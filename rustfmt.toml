@@ -1,0 +1,12 @@
+indent_style = "Visual"
+binop_separator = "Back"
+condense_wildcard_suffixes = true
+where_single_line = true
+format_strings = true
+imports_indent = "Visual"
+merge_imports = true
+match_block_trailing_comma = true
+newline_style = "Unix"
+reorder_impl_items = true
+use_field_init_shorthand = true
+wrap_comments = true
