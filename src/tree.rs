@@ -309,8 +309,8 @@ impl fmt::Display for Kind {
     }
 }
 
-/// A node in a merged bookmark tree. Holds the local node, remote node,
-/// merged children, and a merge state indicating which side to prefer.
+/// A merged bookmark node that indicates which side to prefer, and holds merged
+/// child nodes.
 #[derive(Debug)]
 pub struct MergedNode<'t> {
     pub guid: String,
@@ -373,9 +373,8 @@ impl fmt::Display for StructureState {
     }
 }
 
-/// The merge state indicates which node we should prefer when reconciling
-/// with Places. Recall that a merged node may point to a local node, remote
-/// node, or both.
+/// The merge state indicates which node we should prefer, local or remote, when
+/// resolving conflicts.
 #[derive(Clone, Copy, Debug)]
 pub struct MergeState<'t>(ValueState<'t>, StructureState);
 
@@ -384,20 +383,13 @@ impl<'t> MergeState<'t> {
     /// structure state. This could mean that the item doesn't exist on the
     /// server yet, or that it has newer local changes that we should
     /// upload.
-    ///
-    /// It's an error for a merged node to have a local merge state without a
-    /// local node. Deciding the value state for the merged node asserts
-    /// this.
     pub fn local(node: Node<'t>) -> MergeState<'t> {
         MergeState(ValueState::Local(node), StructureState::Local)
     }
 
-    /// A remote merge state means we should update Places with new value and
-    /// structure state from the mirror. The item might not exist locally yet,
-    /// or might have newer remote changes that we should apply.
-    ///
-    /// As with local, a merged node can't have a remote merge state without a
-    /// remote node.
+    /// A remote merge state means we should update the local value and
+    /// structure state. The item might not exist locally yet, or might have
+    /// newer remote changes that we should apply.
     pub fn remote(node: Node<'t>) -> MergeState<'t> {
         MergeState(ValueState::Remote(node), StructureState::Remote)
     }
@@ -407,8 +399,7 @@ impl<'t> MergeState<'t> {
     /// remotely deleted folder, or remote items out of a locally deleted
     /// folder.
     ///
-    /// Applying a new merged node bumps its local change counter, so that the
-    /// merged structure is reuploaded to the server.
+    /// New merged nodes should be reuploaded to the server.
     pub fn new(old: MergeState<'t>) -> MergeState<'t> {
         MergeState(old.0, StructureState::New)
     }
@@ -431,7 +422,7 @@ impl<'t> fmt::Display for MergeState<'t> {
 }
 
 /// Content info for an item in the local or remote tree. This is used to dedupe
-/// NEW local items to remote items that don't exist locally.
+/// new local items to remote items that don't exist locally.
 #[derive(Debug)]
 pub struct Content {
     pub title: String,

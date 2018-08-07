@@ -10,15 +10,14 @@ use tree::{Content, ContentDupeKey, MergeState, MergedNode, Node, Tree};
 
 const ROOT_GUID: &str = "root________";
 
-lazy_static! {
-    static ref USER_CONTENT_ROOTS: Vec<&'static str> = vec!["toolbar_____",
-                                                            "menu________",
-                                                            "unfiled_____",
-                                                            "mobile______"];
-}
+static USER_CONTENT_ROOTS: &'static [&'static str] = &["toolbar_____",
+                                                       "menu________",
+                                                       "unfiled_____",
+                                                       "mobile______"];
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
+#[derive(PartialEq)]
 enum StructureChange {
     /// Node not deleted, or doesn't exist, on the other side.
     Unchanged,
@@ -54,27 +53,19 @@ type MatchingDupes<'t> = (HashMap<String, Node<'t>>, HashMap<String, Node<'t>>);
 /// "mirror", respectively. Overlaying buffer onto mirror yields the current
 /// server tree; overlaying local onto mirror yields the complete local tree.
 ///
-/// On Desktop, our `localTree` is the union of iOS's mirror and local, and our
-/// `remoteTree` is the union of iOS's mirror and buffer. Mapping the iOS
-/// concepts to Desktop:
+/// Vellum doesn't store the shared parent for changed items, so we can only
+/// do two-way merges. Our local tree is the union of iOS's mirror and local,
+/// and our remote tree is the union of iOS's mirror and buffer.
 ///
-/// - "Mirror" is approximately all `moz_bookmarks` where `syncChangeCounter =
-/// 0`   and `items` where `needs_merge = 0`. This is approximate because
-/// Desktop   doesn't store the shared parent for changed items.
-/// - "Local" is all `moz_bookmarks` where `syncChangeCounter > 0`.
-/// - "Buffer" is all `items` where `needs_merge = 1`.
-///
-/// Since we don't store the shared parent, we can only do two-way merges. Also,
-/// our merger doesn't distinguish between structure and value changes, since we
-/// don't record that state in Places. The change counter notes *that* a
-/// bookmark changed, but not *how*. This means we might choose the wrong side
-/// when resolving merge conflicts, while iOS will do the right thing.
+/// Unlike iOS, Vellum doesn't distinguish between structure and value changes.
+/// The `needs_merge` flag notes *that* a bookmark changed, but not *how*. This
+/// means we might detect conflicts, and revert changes on one side, for cases
+/// that iOS can merge cleanly.
 ///
 /// Fortunately, most of our users don't organize their bookmarks into deeply
 /// nested hierarchies, or make conflicting changes on multiple devices
-/// simultaneously. Changing Places to record structure and value changes would
-/// require significant changes to the storage schema. A simpler two-way tree
-/// merge strikes a good balance between correctness and complexity.
+/// simultaneously. A simpler two-way tree merge strikes a good balance between
+/// correctness and complexity.
 pub struct Merger<'t> {
     local_tree: &'t Tree,
     new_local_contents: &'t HashMap<String, Content>,
@@ -116,8 +107,8 @@ impl<'t> Merger<'t> {
 
         // Any remaining deletions on one side should be deleted on the other side.
         // This happens when the remote tree has tombstones for items that don't
-        // exist in Places, or Places has tombstones for items that aren't on the
-        // server.
+        // exist locally, or the local tree has tombstones for items that
+        // aren't on the server.
         for guid in self.local_tree.deletions() {
             if !self.mentions(guid) {
                 self.delete_remotely.insert(guid.to_string());
@@ -133,12 +124,7 @@ impl<'t> Merger<'t> {
     }
 
     pub fn subsumes(&self, tree: &Tree) -> bool {
-        for guid in tree.guids() {
-            if !self.mentions(guid) {
-                return false;
-            }
-        }
-        true
+        tree.guids().iter().all(|guid| self.mentions(guid))
     }
 
     #[inline]
@@ -271,11 +257,7 @@ impl<'t> Merger<'t> {
             // The node was changed remotely, but not locally. Take the remote state.
             return MergeState::remote(remote_node);
         }
-        // At this point, we know the item changed locally and remotely. We could
-        // query storage to determine if the value state is the same, as iOS does.
-        // However, that's an expensive check that requires joining `moz_bookmarks`,
-        // `moz_items_annos`, and `moz_places` to the mirror. It's unlikely that
-        // the value state is identical, so we skip the value check and use the
+        // At this point, we know the item changed locally and remotely. Use the
         // timestamp to decide which node is newer.
         if local_node.newer_than(&remote_node) {
             MergeState::local(local_node)
@@ -332,10 +314,10 @@ impl<'t> Merger<'t> {
         }
 
         // Make sure the remote child isn't locally deleted.
-        if let StructureChange::Deleted =
-            self.check_for_local_structure_change_of_remote_node(merged_node,
-                                                                 remote_parent_node,
-                                                                 remote_child_node)?
+        if self.check_for_local_structure_change_of_remote_node(merged_node,
+                                                                remote_parent_node,
+                                                                remote_child_node)? ==
+           StructureChange::Deleted
         {
             // If the remote child is locally deleted, we need to move all descendants
             // that aren't also remotely deleted to the merged node. This handles the
@@ -368,8 +350,7 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&local_child_node.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
-                merged_node.merged_children
-                           .push(Box::new(merged_child_node));
+                merged_node.merged_children.push(merged_child_node.into());
                 return Ok(false);
             }
 
@@ -410,8 +391,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children
-                               .push(Box::new(merged_child_node));
+                    merged_node.merged_children.push(merged_child_node.into());
                     return Ok(false);
                 },
 
@@ -429,8 +409,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children
-                               .push(Box::new(merged_child_node));
+                    merged_node.merged_children.push(merged_child_node.into());
                     return Ok(false);
                 },
             }
@@ -448,8 +427,7 @@ impl<'t> Merger<'t> {
             let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                     local_child_node_by_content,
                                                     Some(remote_child_node))?;
-            merged_node.merged_children
-                       .push(Box::new(merged_child_node));
+            merged_node.merged_children.push(merged_child_node.into());
             return Ok(false);
         }
     }
@@ -483,22 +461,20 @@ impl<'t> Merger<'t> {
         if USER_CONTENT_ROOTS.contains(&local_child_node.guid.as_str()) {
             // Local child is a root, which may or may not exist remotely. We know
             // local roots are parented correctly, so we merge them unconditionally.
-            // Places maintenance also bumps the change counter when fixing incorrect
-            // parents, so we'll flag the merged root node for reupload.
             let remote_root_node = self.remote_tree.node_for_guid(&local_child_node.guid);
             let merged_root_node = self.merge_node(&local_child_node.guid,
                                                    Some(local_child_node),
                                                    remote_root_node)?;
-            merged_node.merged_children.push(Box::new(merged_root_node));
+            merged_node.merged_children.push(merged_root_node.into());
             return Ok(true);
         }
 
         // Now, we know we haven't seen the local child before, and it's not in
         // this folder on the server. Check if the child is remotely deleted.
-        if let StructureChange::Deleted =
-            self.check_for_remote_structure_change_of_local_node(merged_node,
-                                                                 local_parent_node,
-                                                                 local_child_node)?
+        if self.check_for_remote_structure_change_of_local_node(merged_node,
+                                                                local_parent_node,
+                                                                local_child_node)? ==
+           StructureChange::Deleted
         {
             // If the child is remotely deleted, we need to move any new local
             // descendants to the merged node, just as we did for new remote
@@ -530,8 +506,7 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&local_child_node.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
-                merged_node.merged_children
-                           .push(Box::new(merged_child_node));
+                merged_node.merged_children.push(merged_child_node.into());
                 return Ok(true);
             }
 
@@ -568,8 +543,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&local_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children
-                               .push(Box::new(merged_child_node));
+                    merged_node.merged_children.push(merged_child_node.into());
                     return Ok(true);
                 },
                 (true, false) => {
@@ -580,8 +554,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&local_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children
-                               .push(Box::new(merged_child_node));
+                    merged_node.merged_children.push(merged_child_node.into());
                     return Ok(true);
                 },
                 (false, _) => {
@@ -608,16 +581,14 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&remote_child_node_by_content.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node_by_content))?;
-                merged_node.merged_children
-                           .push(Box::new(merged_child_node));
+                merged_node.merged_children.push(merged_child_node.into());
                 return Ok(false);
             } else {
                 // The local child doesn't exist remotely, but we still need to walk
                 // its children.
                 let merged_child_node =
                     self.merge_node(&local_child_node.guid, Some(local_child_node), None)?;
-                merged_node.merged_children
-                           .push(Box::new(merged_child_node));
+                merged_node.merged_children.push(merged_child_node.into());
                 return Ok(true);
             }
         }
@@ -680,7 +651,7 @@ impl<'t> Merger<'t> {
         // orphans, but we also need to flag the containing folder so that it's
         // reuploaded to the server along with the new children.
         if merge_state_changed {
-            let new_merge_state = MergeState::new(merged_node.merge_state.clone());
+            let new_merge_state = MergeState::new(merged_node.merge_state);
             trace!("Merge state for {} has new structure {}",
                    merged_node,
                    new_merge_state);
@@ -782,9 +753,8 @@ impl<'t> Merger<'t> {
             if let Some(local_node) = self.local_tree.node_for_guid(&remote_node.guid) {
                 if !local_node.is_syncable {
                     // The remote node is syncable, but the local node is non-syncable.
-                    // This is unlikely now that Places no longer supports custom roots,
-                    // but, for consistency, we unconditionally delete the node from the
-                    // server.
+                    // For consistency with Desktop, we unconditionally delete the
+                    // node from the server.
                     self.delete_remotely.insert(remote_node.guid.to_string());
                     if remote_node.is_folder() {
                         self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
@@ -814,8 +784,8 @@ impl<'t> Merger<'t> {
                 return Ok(StructureChange::Unchanged);
             }
             // For folders, we always take the local deletion and relocate remotely
-            // changed grandchildren to the merged node. We could use the mirror to
-            // revive the child folder, but it's easier to relocate orphaned
+            // changed grandchildren to the merged node. We could use the remote
+            // tree to revive the child folder, but it's easier to relocate orphaned
             // grandchildren than to partially revive the child folder.
             trace!("Remote folder {} deleted locally and changed remotely; taking local deletion",
                    remote_node);
@@ -853,8 +823,7 @@ impl<'t> Merger<'t> {
 
         if !local_node.is_syncable {
             // If the local node is known to be non-syncable, we unconditionally
-            // delete it from Places, even if it's syncable remotely. This is
-            // unlikely now that Places no longer supports custom roots.
+            // delete it from the local tree, even if it's syncable remotely.
             self.delete_locally.insert(local_node.guid.to_string());
             if local_node.is_folder() {
                 self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
@@ -868,8 +837,7 @@ impl<'t> Merger<'t> {
                     // The local node is syncable, but the remote node is non-syncable.
                     // This can happen if we applied an orphaned left pane query in a
                     // previous sync, and later saw the left pane root on the server.
-                    // Since we now have the complete subtree, we can remove the item from
-                    // Places.
+                    // Since we now have the complete subtree, we can remove the item.
                     self.delete_locally.insert(local_node.guid.to_string());
                     if remote_node.is_folder() {
                         self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
@@ -948,8 +916,7 @@ impl<'t> Merger<'t> {
                     // Flag the moved orphan for reupload.
                     let merge_state = MergeState::new(merged_orphan_node.merge_state);
                     merged_orphan_node.merge_state = merge_state;
-                    merged_node.merged_children
-                               .push(Box::new(merged_orphan_node));
+                    merged_node.merged_children.push(merged_orphan_node.into());
                 },
             }
         }
@@ -987,8 +954,7 @@ impl<'t> Merger<'t> {
 
                     let merge_state = MergeState::new(merged_orphan_node.merge_state);
                     merged_orphan_node.merge_state = merge_state;
-                    merged_node.merged_children
-                               .push(Box::new(merged_orphan_node));
+                    merged_node.merged_children.push(merged_orphan_node.into());
                 },
             }
         }
