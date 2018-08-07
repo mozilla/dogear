@@ -1153,3 +1153,136 @@ impl<'t> Merger<'t> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree::{Item, Kind};
+
+    #[derive(Debug)]
+    struct Node {
+        item: Item,
+        children: Vec<Box<Node>>,
+    }
+
+    impl Into<Tree> for Node {
+        fn into(self) -> Tree {
+            fn inflate(tree: &mut Tree, parent_guid: &str, node: Node) {
+                let guid = node.item.guid.clone();
+                tree.insert(parent_guid, node.item);
+                node.children
+                    .into_iter()
+                    .for_each(|child| inflate(tree, &guid, *child))
+            }
+
+            let guid = self.item.guid.clone();
+            let mut tree = Tree::new(self.item);
+            self.children
+                .into_iter()
+                .for_each(|child| inflate(&mut tree, &guid, *child));
+            tree
+        }
+    }
+
+    macro_rules! nodes {
+        ($children:tt) => { nodes!(ROOT_GUID, Folder, $children) };
+        ($guid:expr, $kind:ident) => { nodes!($guid, $kind[]) };
+        ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
+            let mut item = Item::new($guid, Kind::$kind);
+            $({ item.$name = $value; })*
+            Node { item, children: Vec::new() }
+        }};
+        ($guid:expr, $kind:ident, $children:tt) => { nodes!($guid, $kind[], $children) };
+        ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ], { $(( $($children:tt)+ )),* }) => {{
+            let mut node = nodes!($guid, $kind [ $( $name = $value ),* ]);
+            $({
+                let child = nodes!($($children)*);
+                node.children.push(child.into());
+            })*
+            node
+        }};
+    }
+
+    #[test]
+    fn complex_orphaning() {
+        let shared_tree: Tree = nodes!({
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("folderBBBBBB", Folder)
+                })
+            }),
+            ("menu________", Folder, {
+                ("folderCCCCCC", Folder, {
+                    ("folderDDDDDD", Folder, {
+                        ("folderEEEEEE", Folder)
+                    })
+                })
+            })
+        }).into();
+
+        // Locally: delete E, add B > F.
+        let mut local_tree: Tree = nodes!({
+            ("toolbar_____", Folder[needs_merge = false], {
+                ("folderAAAAAA", Folder, {
+                    ("folderBBBBBB", Folder[needs_merge = true], {
+                        ("bookmarkFFFF", Bookmark[needs_merge = true])
+                    })
+                })
+            }),
+            ("menu________", Folder, {
+                ("folderCCCCCC", Folder, {
+                    ("folderDDDDDD", Folder[needs_merge = true])
+                })
+            })
+        }).into();
+        local_tree.note_deleted("folderEEEEEE");
+        let new_local_contents = HashMap::new();
+
+        // Remotely: delete B, add E > G.
+        let mut remote_tree: Tree = nodes!({
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true])
+            }),
+            ("menu________", Folder, {
+                ("folderCCCCCC", Folder, {
+                    ("folderDDDDDD", Folder, {
+                        ("folderEEEEEE", Folder[needs_merge = true], {
+                            ("bookmarkGGGG", Bookmark[needs_merge = true])
+                        })
+                    })
+                })
+            })
+        }).into();
+        remote_tree.note_deleted("folderBBBBBB");
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder, {
+                    // B was deleted remotely, so F moved to A, the closest
+                    // surviving parent.
+                    ("bookmarkFFFF", Bookmark)
+                })
+            }),
+            ("menu________", Folder, {
+                ("folderCCCCCC", Folder, {
+                    ("folderDDDDDD", Folder, {
+                        // E was deleted locally, so G moved to D.
+                        ("bookmarkGGGG", Bookmark)
+                    })
+                })
+            })
+        }).into();
+
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+}
