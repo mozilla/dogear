@@ -239,10 +239,10 @@ impl<'t> Node<'t> {
                 let children_prefix = format!("{}| ", prefix);
                 let children = self.children().iter()
                     .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
-                format!("{}+ {}\n{}", prefix, &self.1.item, children)
+                format!("{}📂 {}\n{}", prefix, &self.1.item, children)
             },
             _ => {
-                format!("{}- {}", prefix, &self.1.item)
+                format!("{}🔖 {}", prefix, &self.1.item)
             }
         }
     }
@@ -360,10 +360,10 @@ impl<'t> MergedNode<'t> {
                 let children_prefix = format!("{}| ", prefix);
                 let children = self.merged_children.iter()
                     .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
-                format!("{}+ {}\n{}", prefix, &self, children)
+                format!("{}📂 {}\n{}", prefix, &self, children)
             },
             _ => {
-                format!("{}- {}", prefix, &self)
+                format!("{}🔖 {}", prefix, &self)
             }
         }
     }
