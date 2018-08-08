@@ -229,11 +229,16 @@ impl<'t> Node<'t> {
     fn ascii_tree_prefixed(&self, prefix: &str) -> String {
         match self.1.item.kind {
             Kind::Folder => {
-                let children_prefix = format!("{}| ", prefix);
-                let children = self.children()
-                                   .map(|n| n.ascii_tree_prefixed(&children_prefix))
-                                   .join("\n");
-                format!("{}📂 {}\n{}", prefix, &self.1.item, children)
+                match self.1.child_indices.len() {
+                    0 => format!("{}📂 {}", prefix, &self.1.item),
+                    _ => {
+                        let children_prefix = format!("{}| ", prefix);
+                        let children = self.children()
+                                           .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                           .join("\n");
+                        format!("{}📂 {}\n{}", prefix, &self.1.item, children)
+                    },
+                }
             },
             _ => format!("{}🔖 {}", prefix, &self.1.item),
         }
@@ -347,14 +352,21 @@ impl<'t> MergedNode<'t> {
     }
 
     fn ascii_tree_prefixed(&self, prefix: &str) -> String {
-        match self.merged_children.len() {
-            n if n > 0 => {
-                let children_prefix = format!("{}| ", prefix);
-                let children = self.merged_children
-                                   .iter()
-                                   .map(|n| n.ascii_tree_prefixed(&children_prefix))
-                                   .join("\n");
-                format!("{}📂 {}\n{}", prefix, &self, children)
+        let value_state = self.merge_state.value();
+        let decided_value = value_state.node();
+        match decided_value.kind {
+            Kind::Folder => {
+                match self.merged_children.len() {
+                    0 => format!("{}📂 {}", prefix, &self),
+                    _ => {
+                        let children_prefix = format!("{}| ", prefix);
+                        let children = self.merged_children
+                                           .iter()
+                                           .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                           .join("\n");
+                        format!("{}📂 {}\n{}", prefix, &self, children)
+                    },
+                }
             },
             _ => format!("{}🔖 {}", prefix, &self),
         }
