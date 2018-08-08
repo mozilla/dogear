@@ -310,9 +310,9 @@ impl Item {
 impl fmt::Display for Item {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let info = if self.needs_merge {
-            format!("({}; Age = {}ms; Unmerged", self.kind, self.age)
+            format!("{}; Age = {}ms; Unmerged", self.kind, self.age)
         } else {
-            format!("({}; Age = {}ms", self.kind, self.age)
+            format!("{}; Age = {}ms", self.kind, self.age)
         };
         write!(f, "{} ({})", self.guid, info)
     }
