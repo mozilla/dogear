@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use itertools::Itertools;
 use std::{cmp::{Eq, PartialEq},
           collections::{HashMap, HashSet},
           fmt,
           hash::{Hash, Hasher},
           ops::Deref};
-use itertools::Itertools;
 
 /// A complete, rooted bookmark tree with tombstones.
 ///
@@ -237,13 +237,13 @@ impl<'t> Node<'t> {
         match self.1.item.kind {
             Kind::Folder => {
                 let children_prefix = format!("{}| ", prefix);
-                let children = self.children().iter()
-                    .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
+                let children = self.children()
+                                   .iter()
+                                   .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                   .join("\n");
                 format!("{}📂 {}\n{}", prefix, &self.1.item, children)
             },
-            _ => {
-                format!("{}🔖 {}", prefix, &self.1.item)
-            }
+            _ => format!("{}🔖 {}", prefix, &self.1.item),
         }
     }
 }
@@ -358,13 +358,13 @@ impl<'t> MergedNode<'t> {
         match self.merged_children.len() {
             n if n > 0 => {
                 let children_prefix = format!("{}| ", prefix);
-                let children = self.merged_children.iter()
-                    .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
+                let children = self.merged_children
+                                   .iter()
+                                   .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                   .join("\n");
                 format!("{}📂 {}\n{}", prefix, &self, children)
             },
-            _ => {
-                format!("{}🔖 {}", prefix, &self)
-            }
+            _ => format!("{}🔖 {}", prefix, &self),
         }
     }
 }
