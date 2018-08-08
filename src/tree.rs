@@ -356,14 +356,14 @@ impl<'t> MergedNode<'t> {
 
     fn ascii_tree_prefixed(&self, prefix: &str) -> String {
         match self.merged_children.len() {
-            0 => {
-                format!("{}- {}", prefix, &self)
-            },
-            _ => {
+            n if n > 0 => {
                 let children_prefix = format!("{}| ", prefix);
                 let children = self.merged_children.iter()
                     .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
                 format!("{}+ {}\n{}", prefix, &self, children)
+            },
+            _ => {
+                format!("{}- {}", prefix, &self)
             }
         }
     }
