@@ -7,6 +7,7 @@ use std::{cmp::{Eq, PartialEq},
           fmt,
           hash::{Hash, Hasher},
           ops::Deref};
+use itertools::Itertools;
 
 /// A complete, rooted bookmark tree with tombstones.
 ///
@@ -94,6 +95,12 @@ impl Tree {
 
     fn node(&self, index: usize) -> Node {
         Node(self, &self.entries[index])
+    }
+
+    pub fn ascii_tree(&self) -> String {
+        let root = self.node(0);
+        let deleted_guids = self.deleted_guids.iter().join(", ");
+        format!("{}\nDeleted: [{}]", root.ascii_tree(), deleted_guids)
     }
 }
 
@@ -221,6 +228,24 @@ impl<'t> Node<'t> {
     pub fn level(&self) -> u64 {
         self.1.level
     }
+
+    pub fn ascii_tree(&self) -> String {
+        self.ascii_tree_prefixed("")
+    }
+
+    fn ascii_tree_prefixed(&self, prefix: &str) -> String {
+        match self.1.item.kind {
+            Kind::Folder => {
+                let children_prefix = format!("{}| ", prefix);
+                let children = self.children().iter()
+                    .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
+                format!("{}+ {}\n{}", prefix, &self.1.item, children)
+            },
+            _ => {
+                format!("{}- {}", prefix, &self.1.item)
+            }
+        }
+    }
 }
 
 impl<'t> Deref for Node<'t> {
@@ -323,6 +348,24 @@ impl<'t> MergedNode<'t> {
         MergedNode { guid,
                      merge_state,
                      merged_children: Vec::new(), }
+    }
+
+    pub fn ascii_tree(&self) -> String {
+        self.ascii_tree_prefixed("")
+    }
+
+    fn ascii_tree_prefixed(&self, prefix: &str) -> String {
+        match self.merged_children.len() {
+            0 => {
+                format!("{}- {}", prefix, &self)
+            },
+            _ => {
+                let children_prefix = format!("{}| ", prefix);
+                let children = self.merged_children.iter()
+                    .map(|n| n.ascii_tree_prefixed(&children_prefix)).join("\n");
+                format!("{}+ {}\n{}", prefix, &self, children)
+            }
+        }
     }
 }
 
