@@ -8,9 +8,6 @@ extern crate failure;
 extern crate failure_derive;
 
 #[macro_use]
-extern crate itertools;
-
-#[macro_use]
 extern crate log;
 
 mod error;

@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use itertools::Itertools;
 use std::{cmp::{Eq, PartialEq},
           collections::{HashMap, HashSet},
           fmt,
@@ -91,11 +90,24 @@ impl Tree {
     fn node(&self, index: usize) -> Node {
         Node(self, &self.entries[index])
     }
+}
 
-    pub fn ascii_tree(&self) -> String {
+impl fmt::Display for Tree {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let root = self.node(0);
-        let deleted_guids = self.deleted_guids.iter().join(", ");
-        format!("{}\nDeleted: [{}]", root.ascii_tree(), deleted_guids)
+        let deleted_guids = self.deleted_guids
+                                .iter()
+                                .map(|guid| guid.as_ref())
+                                .collect::<Vec<&str>>();
+        match deleted_guids.len() {
+            0 => write!(f, "{}", root.to_ascii_string()),
+            _ => {
+                write!(f,
+                       "{}\nDeleted: [{}]",
+                       root.to_ascii_string(),
+                       deleted_guids.join(","))
+            },
+        }
     }
 }
 
@@ -222,11 +234,11 @@ impl<'t> Node<'t> {
         self.1.level
     }
 
-    pub fn ascii_tree(&self) -> String {
-        self.ascii_tree_prefixed("")
+    pub fn to_ascii_string(&self) -> String {
+        self.to_ascii_fragment("")
     }
 
-    fn ascii_tree_prefixed(&self, prefix: &str) -> String {
+    fn to_ascii_fragment(&self, prefix: &str) -> String {
         match self.1.item.kind {
             Kind::Folder => {
                 match self.1.child_indices.len() {
@@ -234,7 +246,8 @@ impl<'t> Node<'t> {
                     _ => {
                         let children_prefix = format!("{}| ", prefix);
                         let children = self.children()
-                                           .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                           .map(|n| n.to_ascii_fragment(&children_prefix))
+                                           .collect::<Vec<String>>()
                                            .join("\n");
                         format!("{}📂 {}\n{}", prefix, &self.1.item, children)
                     },
@@ -347,11 +360,11 @@ impl<'t> MergedNode<'t> {
                      merged_children: Vec::new(), }
     }
 
-    pub fn ascii_tree(&self) -> String {
-        self.ascii_tree_prefixed("")
+    pub fn to_ascii_string(&self) -> String {
+        self.to_ascii_fragment("")
     }
 
-    fn ascii_tree_prefixed(&self, prefix: &str) -> String {
+    fn to_ascii_fragment(&self, prefix: &str) -> String {
         let value_state = self.merge_state.value();
         let decided_value = value_state.node();
         match decided_value.kind {
@@ -362,7 +375,8 @@ impl<'t> MergedNode<'t> {
                         let children_prefix = format!("{}| ", prefix);
                         let children = self.merged_children
                                            .iter()
-                                           .map(|n| n.ascii_tree_prefixed(&children_prefix))
+                                           .map(|n| n.to_ascii_fragment(&children_prefix))
+                                           .collect::<Vec<String>>()
                                            .join("\n");
                         format!("{}📂 {}\n{}", prefix, &self, children)
                     },
