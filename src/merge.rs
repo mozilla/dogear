@@ -301,18 +301,6 @@ impl<'t> Merger<'t> {
                remote_parent_node,
                merged_node);
 
-        if USER_CONTENT_ROOTS.contains(&remote_child_node.guid.as_str()) {
-            // Remote child is a root. We always prefer local roots, since remote
-            // roots might be misparented, and we checked that the local roots were
-            // correct before merging. We can just bail here: if the root is parented
-            // correctly, we won't reupload anything, since we never upload the Places
-            // root; if not, we'll flag the wrong parent for reupload.
-            trace!("Ignoring remote root {} in {}",
-                   remote_child_node,
-                   remote_parent_node);
-            return Ok(true);
-        }
-
         // Make sure the remote child isn't locally deleted.
         if self.check_for_local_structure_change_of_remote_node(merged_node,
                                                                 remote_parent_node,
@@ -457,17 +445,6 @@ impl<'t> Merger<'t> {
                local_child_node,
                local_parent_node,
                merged_node);
-
-        if USER_CONTENT_ROOTS.contains(&local_child_node.guid.as_str()) {
-            // Local child is a root, which may or may not exist remotely. We know
-            // local roots are parented correctly, so we merge them unconditionally.
-            let remote_root_node = self.remote_tree.node_for_guid(&local_child_node.guid);
-            let merged_root_node = self.merge_node(&local_child_node.guid,
-                                                   Some(local_child_node),
-                                                   remote_root_node)?;
-            merged_node.merged_children.push(merged_root_node.into());
-            return Ok(true);
-        }
 
         // Now, we know we haven't seen the local child before, and it's not in
         // this folder on the server. Check if the child is remotely deleted.
@@ -731,11 +708,6 @@ impl<'t> Merger<'t> {
                                                        remote_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
-        if USER_CONTENT_ROOTS.contains(&remote_node.guid.as_str()) {
-            // Should never happen. We should have seen and ignored remote roots.
-            panic!("Shouldn't check remote syncable root for structure changes");
-        }
-
         if !remote_node.is_syncable {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it from the server, even if it's syncable locally.
@@ -816,11 +788,6 @@ impl<'t> Merger<'t> {
                                                        local_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
-        if USER_CONTENT_ROOTS.contains(&local_node.guid.as_str()) {
-            // Should never happen. We should have merged local roots unconditionally.
-            panic!("Shouldn't check local syncable root for structure changes");
-        }
-
         if !local_node.is_syncable {
             // If the local node is known to be non-syncable, we unconditionally
             // delete it from the local tree, even if it's syncable remotely.
