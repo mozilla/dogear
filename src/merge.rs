@@ -1123,7 +1123,10 @@ impl<'t> Merger<'t> {
 
 #[cfg(test)]
 mod tests {
+    extern crate env_logger;
+
     use super::*;
+    use std::sync::Once;
     use tree::{Item, Kind};
 
     #[derive(Debug)]
@@ -1170,8 +1173,338 @@ mod tests {
         }};
     }
 
+    fn before_each() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+                           env_logger::init();
+                       });
+    }
+
+    #[test]
+    fn reparent_and_reposition() {
+        before_each();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder[needs_merge = true], {
+                    ("bookmarkAAAA", Bookmark[needs_merge = true]),
+                    ("folderBBBBBB", Folder[needs_merge = true], {
+                        ("bookmarkCCCC", Bookmark[needs_merge = true]),
+                        ("bookmarkDDDD", Bookmark[needs_merge = true])
+                    }),
+                    ("bookmarkEEEE", Bookmark[needs_merge = true])
+                }),
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("folderBBBBBB", Folder[needs_merge = true], {
+                    ("bookmarkDDDD", Bookmark[needs_merge = true]),
+                    ("bookmarkAAAA", Bookmark[needs_merge = true]),
+                    ("bookmarkCCCC", Bookmark[needs_merge = true])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkFFFF", Bookmark[needs_merge = true]),
+                    ("bookmarkEEEE", Bookmark[needs_merge = true])
+                })
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("unfiled_____", Folder, {
+                ("folderBBBBBB", Folder, {
+                    ("bookmarkDDDD", Bookmark),
+                    ("bookmarkAAAA", Bookmark),
+                    ("bookmarkCCCC", Bookmark)
+                })
+            }),
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkEEEE", Bookmark)
+                })
+            }),
+            ("menu________", Folder, {
+                ("bookmarkFFFF", Bookmark)
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    // This test moves a bookmark that exists locally into a new folder that only
+    // exists remotely, and is a later sibling of the local parent.
+    #[test]
+    fn move_into_parent_sibling() {
+        before_each();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder[needs_merge = true], {
+                    ("bookmarkBBBB", Bookmark[needs_merge = true])
+                })
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder[needs_merge = true]),
+                ("folderCCCCCC", Folder[needs_merge = true], {
+                    ("bookmarkBBBB", Bookmark[needs_merge = true])
+                })
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder),
+                ("folderCCCCCC", Folder, {
+                    ("bookmarkBBBB", Bookmark)
+                })
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    #[test]
+    fn reorder_and_insert() {
+        before_each();
+
+        let shared_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkBBBB", Bookmark),
+                ("bookmarkCCCC", Bookmark)
+            }),
+            ("toolbar_____", Folder, {
+                ("bookmarkDDDD", Bookmark),
+                ("bookmarkEEEE", Bookmark),
+                ("bookmarkFFFF", Bookmark)
+            })
+        }).into();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkCCCC", Bookmark),
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkBBBB", Bookmark)
+            }),
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("bookmarkDDDD", Bookmark),
+                ("bookmarkEEEE", Bookmark),
+                ("bookmarkFFFF", Bookmark),
+                ("bookmarkGGGG", Bookmark[needs_merge = true]),
+                ("bookmarkHHHH", Bookmark[needs_merge = true])
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true, age = 5], {
+                ("bookmarkAAAA", Bookmark[age = 5]),
+                ("bookmarkBBBB", Bookmark[age = 5]),
+                ("bookmarkCCCC", Bookmark[age = 5]),
+                ("bookmarkIIII", Bookmark[needs_merge = true]),
+                ("bookmarkJJJJ", Bookmark[needs_merge = true])
+            }),
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("bookmarkFFFF", Bookmark),
+                ("bookmarkDDDD", Bookmark),
+                ("bookmarkEEEE", Bookmark)
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                // The server has an older menu, so we should use the local order (C A B)
+                // as the base, then append (I J).
+                ("bookmarkCCCC", Bookmark[age = 5]),
+                ("bookmarkAAAA", Bookmark[age = 5]),
+                ("bookmarkBBBB", Bookmark[age = 5]),
+                ("bookmarkIIII", Bookmark),
+                ("bookmarkJJJJ", Bookmark)
+            }),
+            ("toolbar_____", Folder[age = 5], {
+                // The server has a newer toolbar, so we should use the remote order (F D E)
+                // as the base, then append (G H).
+                ("bookmarkFFFF", Bookmark),
+                ("bookmarkDDDD", Bookmark),
+                ("bookmarkEEEE", Bookmark),
+                ("bookmarkGGGG", Bookmark),
+                ("bookmarkHHHH", Bookmark)
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    #[test]
+    fn value_structure_conflict() {
+        before_each();
+
+        let shared_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkCCCC", Bookmark)
+                }),
+                ("folderDDDDDD", Folder, {
+                    ("bookmarkEEEE", Bookmark)
+                })
+            })
+        }).into();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true, age = 10], {
+                    ("bookmarkCCCC", Bookmark)
+                }),
+                ("folderDDDDDD", Folder[needs_merge = true, age = 10], {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkEEEE", Bookmark[age = 10])
+                })
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkCCCC", Bookmark)
+                }),
+                ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
+                    ("bookmarkEEEE", Bookmark[needs_merge = true, age = 5])
+                })
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkCCCC", Bookmark)
+                }),
+                ("folderDDDDDD", Folder[age = 5], {
+                    ("bookmarkEEEE", Bookmark[age = 5]),
+                    ("bookmarkBBBB", Bookmark)
+                })
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    #[test]
+    fn complex_move_with_additions() {
+        before_each();
+
+        let shared_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkCCCC", Bookmark)
+                })
+            })
+        }).into();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkCCCC", Bookmark),
+                    ("bookmarkDDDD", Bookmark)
+                })
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("bookmarkCCCC", Bookmark)
+            }),
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder, {
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkEEEE", Bookmark)
+                })
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("bookmarkCCCC", Bookmark)
+            }),
+            ("toolbar_____", Folder, {
+                ("folderAAAAAA", Folder, {
+                    // We can guarantee child order (B E D), since we always walk remote
+                    // children first, and the remote folder A record is newer than the
+                    // local folder. If the local folder were newer, the order would be
+                    // (D B E).
+                    ("bookmarkBBBB", Bookmark),
+                    ("bookmarkEEEE", Bookmark),
+                    ("bookmarkDDDD", Bookmark)
+                })
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
     #[test]
     fn complex_orphaning() {
+        before_each();
+
         let shared_tree: Tree = nodes!({
             ("toolbar_____", Folder, {
                 ("folderAAAAAA", Folder, {
@@ -1248,7 +1581,6 @@ mod tests {
                 })
             })
         }).into();
-
         let merged_tree: Tree = merged_root.into();
         assert_eq!(merged_tree, expected_tree);
     }

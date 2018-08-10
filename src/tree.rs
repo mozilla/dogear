@@ -241,7 +241,7 @@ impl<'t> fmt::Display for Node<'t> {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Item {
     pub guid: String,
-    pub age: u64,
+    pub age: i64,
     pub kind: Kind,
     pub needs_merge: bool,
     pub is_syncable: bool,

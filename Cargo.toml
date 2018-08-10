@@ -7,3 +7,6 @@ authors = ["Lina Cambridge <lina@mozilla.com>"]
 failure = "0.1.1"
 failure_derive = "0.1.1"
 log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.5.12"
