@@ -422,62 +422,16 @@ impl<'t> fmt::Display for MergeState<'t> {
 }
 
 /// Content info for an item in the local or remote tree. This is used to dedupe
-/// new local items to remote items that don't exist locally.
-#[derive(Debug)]
-pub struct Content {
-    pub title: String,
-    pub url_href: String,
-    pub position: i64,
-}
-
-/// A lookup key for a node and its content. This is used to match nodes with
-/// different GUIDs and similar content.
+/// new local items to remote items that don't exist locally, with different
+/// GUIDs and similar content.
 ///
 /// - Bookmarks must have the same title and URL.
 /// - Queries must have the same title and query URL.
 /// - Folders and livemarks must have the same title.
 /// - Separators must have the same position within their parents.
-#[derive(Debug)]
-pub struct ContentDupeKey<'t>(Node<'t>, &'t Content);
-
-impl<'t> ContentDupeKey<'t> {
-    pub fn new(node: Node<'t>, content: &'t Content) -> ContentDupeKey<'t> {
-        ContentDupeKey(node, content)
-    }
-}
-
-impl<'t> PartialEq for ContentDupeKey<'t> {
-    fn eq(&self, other: &ContentDupeKey) -> bool {
-        if self.0.kind != other.0.kind {
-            false
-        } else {
-            match self.0.kind {
-                Kind::Bookmark | Kind::Query => {
-                    self.1.title == other.1.title && self.1.url_href == other.1.url_href
-                },
-                Kind::Folder | Kind::Livemark => self.1.title == other.1.title,
-                Kind::Separator => self.1.position == other.1.position,
-            }
-        }
-    }
-}
-
-impl<'t> Eq for ContentDupeKey<'t> {}
-
-impl<'t> Hash for ContentDupeKey<'t> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.kind.hash(state);
-        match self.0.kind {
-            Kind::Bookmark | Kind::Query => {
-                self.1.title.hash(state);
-                self.1.url_href.hash(state);
-            },
-            Kind::Folder | Kind::Livemark => {
-                self.1.title.hash(state);
-            },
-            Kind::Separator => {
-                self.1.position.hash(state);
-            },
-        }
-    }
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub enum Content {
+    Bookmark { title: String, url_href: String },
+    Folder { title: String },
+    Separator { position: i64 },
 }

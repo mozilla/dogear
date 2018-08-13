@@ -6,7 +6,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
           mem};
 
 use error::{ErrorKind, Result};
-use tree::{Content, ContentDupeKey, MergeState, MergedNode, Node, Tree};
+use tree::{Content, MergeState, MergedNode, Node, Tree};
 
 const ROOT_GUID: &str = "root________";
 
@@ -953,7 +953,7 @@ impl<'t> Merger<'t> {
                                           remote_parent_node: Node<'t>)
                                           -> MatchingDupes<'t>
     {
-        let mut dupe_key_to_local_nodes: HashMap<_, VecDeque<_>> = HashMap::new();
+        let mut dupe_key_to_local_nodes: HashMap<&Content, VecDeque<_>> = HashMap::new();
 
         for local_child_node in local_parent_node.children() {
             if let Some(local_child_content) = self.new_local_contents.get(&local_child_node.guid) {
@@ -970,11 +970,11 @@ impl<'t> Merger<'t> {
                            local_child_node);
                     continue;
                 }
-                let dupe_key = ContentDupeKey::new(local_child_node, local_child_content);
                 // Store matching local children in an array, in case multiple children
                 // have the same dupe key (for example, a toolbar containing multiple
                 // empty folders, as in bug 1213369).
-                let local_nodes_for_key = dupe_key_to_local_nodes.entry(dupe_key).or_default();
+                let local_nodes_for_key = dupe_key_to_local_nodes.entry(local_child_content)
+                                                                 .or_default();
                 local_nodes_for_key.push_back(local_child_node);
             } else {
                 trace!("Not deduping local child {}; already uploaded",
@@ -997,8 +997,9 @@ impl<'t> Merger<'t> {
             if let Some(remote_child_content) =
                 self.new_remote_contents.get(&remote_child_node.guid)
             {
-                let dupe_key = ContentDupeKey::new(remote_child_node, remote_child_content);
-                if let Some(mut local_nodes_for_key) = dupe_key_to_local_nodes.get_mut(&dupe_key) {
+                if let Some(mut local_nodes_for_key) =
+                    dupe_key_to_local_nodes.get_mut(remote_child_content)
+                {
                     if let Some(local_child_node) = local_nodes_for_key.pop_front() {
                         trace!("Deduping local child {} to remote child {}",
                                local_child_node,
@@ -1579,6 +1580,63 @@ mod tests {
                         ("bookmarkGGGG", Bookmark)
                     })
                 })
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    #[test]
+    fn duping_local_newer() {
+        before_each();
+
+        let local_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkAAA1", Bookmark[needs_merge = true]),
+                ("bookmarkAAA2", Bookmark[needs_merge = true]),
+                ("bookmarkAAA3", Bookmark[needs_merge = true])
+            })
+        }).into();
+        let mut new_local_contents: HashMap<String, Content> = HashMap::new();
+        new_local_contents.insert("bookmarkAAA1".into(),
+                                  Content::Bookmark { title: "A".into(),
+                                                      url_href: "http://example.com/a".into(), });
+        new_local_contents.insert("bookmarkAAA2".into(),
+                                  Content::Bookmark { title: "A".into(),
+                                                      url_href: "http://example.com/a".into(), });
+        new_local_contents.insert("bookmarkAAA3".into(),
+                                  Content::Bookmark { title: "A".into(),
+                                                      url_href: "http://example.com/a".into(), });
+
+        let remote_tree: Tree = nodes!({
+            ("menu________", Folder[needs_merge = true, age = 5], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5]),
+                ("bookmarkAAA4", Bookmark[needs_merge = true, age = 5]),
+                ("bookmarkAAA5", Bookmark)
+            })
+        }).into();
+        let mut new_remote_contents: HashMap<String, Content> = HashMap::new();
+        new_remote_contents.insert("bookmarkAAAA".into(),
+                                   Content::Bookmark { title: "A".into(),
+                                                       url_href: "http://example.com/a".into(), });
+        new_remote_contents.insert("bookmarkAAA4".into(),
+                                   Content::Bookmark { title: "A".into(),
+                                                       url_href: "http://example.com/a".into(), });
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("menu________", Folder, {
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkAAA4", Bookmark),
+                ("bookmarkAAA3", Bookmark),
+                ("bookmarkAAA5", Bookmark)
             })
         }).into();
         let merged_tree: Tree = merged_root.into();
