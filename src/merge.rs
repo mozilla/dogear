@@ -338,7 +338,7 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&local_child_node.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
-                merged_node.merged_children.push(merged_child_node.into());
+                merged_node.merged_children.push(merged_child_node);
                 return Ok(false);
             }
 
@@ -379,7 +379,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children.push(merged_child_node.into());
+                    merged_node.merged_children.push(merged_child_node);
                     return Ok(false);
                 },
 
@@ -397,7 +397,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children.push(merged_child_node.into());
+                    merged_node.merged_children.push(merged_child_node);
                     return Ok(false);
                 },
             }
@@ -415,7 +415,7 @@ impl<'t> Merger<'t> {
             let merged_child_node = self.merge_node(&remote_child_node.guid,
                                                     local_child_node_by_content,
                                                     Some(remote_child_node))?;
-            merged_node.merged_children.push(merged_child_node.into());
+            merged_node.merged_children.push(merged_child_node);
             return Ok(false);
         }
     }
@@ -483,7 +483,7 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&local_child_node.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
-                merged_node.merged_children.push(merged_child_node.into());
+                merged_node.merged_children.push(merged_child_node);
                 return Ok(true);
             }
 
@@ -520,7 +520,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&local_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children.push(merged_child_node.into());
+                    merged_node.merged_children.push(merged_child_node);
                     return Ok(true);
                 },
                 (true, false) => {
@@ -531,7 +531,7 @@ impl<'t> Merger<'t> {
                     let merged_child_node = self.merge_node(&local_child_node.guid,
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
-                    merged_node.merged_children.push(merged_child_node.into());
+                    merged_node.merged_children.push(merged_child_node);
                     return Ok(true);
                 },
                 (false, _) => {
@@ -558,14 +558,14 @@ impl<'t> Merger<'t> {
                 let merged_child_node = self.merge_node(&remote_child_node_by_content.guid,
                                                         Some(local_child_node),
                                                         Some(remote_child_node_by_content))?;
-                merged_node.merged_children.push(merged_child_node.into());
+                merged_node.merged_children.push(merged_child_node);
                 return Ok(false);
             } else {
                 // The local child doesn't exist remotely, but we still need to walk
                 // its children.
                 let merged_child_node =
                     self.merge_node(&local_child_node.guid, Some(local_child_node), None)?;
-                merged_node.merged_children.push(merged_child_node.into());
+                merged_node.merged_children.push(merged_child_node);
                 return Ok(true);
             }
         }
@@ -883,7 +883,7 @@ impl<'t> Merger<'t> {
                     // Flag the moved orphan for reupload.
                     let merge_state = MergeState::new(merged_orphan_node.merge_state);
                     merged_orphan_node.merge_state = merge_state;
-                    merged_node.merged_children.push(merged_orphan_node.into());
+                    merged_node.merged_children.push(merged_orphan_node);
                 },
             }
         }
@@ -921,7 +921,7 @@ impl<'t> Merger<'t> {
 
                     let merge_state = MergeState::new(merged_orphan_node.merge_state);
                     merged_orphan_node.merge_state = merge_state;
-                    merged_node.merged_children.push(merged_orphan_node.into());
+                    merged_node.merged_children.push(merged_orphan_node);
                 },
             }
         }

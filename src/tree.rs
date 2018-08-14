@@ -5,7 +5,6 @@
 use std::{cmp::{Eq, PartialEq},
           collections::{HashMap, HashSet},
           fmt,
-          hash::{Hash, Hasher},
           ops::Deref};
 
 /// A complete, rooted bookmark tree with tombstones.
@@ -160,14 +159,14 @@ impl<'t> From<MergedNode<'t>> for Tree {
             tree.insert(parent_guid, to_item(&node));
             node.merged_children
                 .into_iter()
-                .for_each(|merged_child_node| inflate(tree, &guid, *merged_child_node));
+                .for_each(|merged_child_node| inflate(tree, &guid, merged_child_node));
         }
 
         let guid = root.guid.clone();
         let mut tree = Tree::new(to_item(&root));
         root.merged_children
             .into_iter()
-            .for_each(|merged_child_node| inflate(&mut tree, &guid, *merged_child_node));
+            .for_each(|merged_child_node| inflate(&mut tree, &guid, merged_child_node));
         tree
     }
 }
@@ -315,7 +314,7 @@ impl fmt::Display for Kind {
 pub struct MergedNode<'t> {
     pub guid: String,
     pub merge_state: MergeState<'t>,
-    pub merged_children: Vec<Box<MergedNode<'t>>>,
+    pub merged_children: Vec<MergedNode<'t>>,
 }
 
 impl<'t> MergedNode<'t> {
