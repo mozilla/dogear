@@ -13,6 +13,7 @@ extern crate log;
 mod error;
 mod merge;
 mod tree;
+mod guid;
 
 #[cfg(test)]
 mod tests {

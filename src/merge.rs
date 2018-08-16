@@ -7,13 +7,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
 
 use error::{ErrorKind, Result};
 use tree::{Content, MergeState, MergedNode, Node, Tree};
-
-const ROOT_GUID: &str = "root________";
-
-static USER_CONTENT_ROOTS: &'static [&'static str] = &["toolbar_____",
-                                                       "menu________",
-                                                       "unfiled_____",
-                                                       "mobile______"];
+use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -42,7 +36,7 @@ pub struct StructureCounts {
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for
 /// remote GUIDs).
-type MatchingDupes<'t> = (HashMap<String, Node<'t>>, HashMap<String, Node<'t>>);
+type MatchingDupes<'t> = (HashMap<Guid, Node<'t>>, HashMap<Guid, Node<'t>>);
 
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
@@ -68,22 +62,22 @@ type MatchingDupes<'t> = (HashMap<String, Node<'t>>, HashMap<String, Node<'t>>);
 /// correctness and complexity.
 pub struct Merger<'t> {
     local_tree: &'t Tree,
-    new_local_contents: &'t HashMap<String, Content>,
+    new_local_contents: &'t HashMap<Guid, Content>,
     remote_tree: &'t Tree,
-    new_remote_contents: &'t HashMap<String, Content>,
-    matching_dupes_by_local_parent_guid: HashMap<String, MatchingDupes<'t>>,
-    merged_guids: HashSet<String>,
-    delete_locally: HashSet<String>,
-    delete_remotely: HashSet<String>,
+    new_remote_contents: &'t HashMap<Guid, Content>,
+    matching_dupes_by_local_parent_guid: HashMap<Guid, MatchingDupes<'t>>,
+    merged_guids: HashSet<Guid>,
+    delete_locally: HashSet<Guid>,
+    delete_remotely: HashSet<Guid>,
     structure_counts: StructureCounts,
     dupe_count: u64,
 }
 
 impl<'t> Merger<'t> {
     pub fn new(local_tree: &'t Tree,
-               new_local_contents: &'t HashMap<String, Content>,
+               new_local_contents: &'t HashMap<Guid, Content>,
                remote_tree: &'t Tree,
-               new_remote_contents: &'t HashMap<String, Content>)
+               new_remote_contents: &'t HashMap<Guid, Content>)
                -> Merger<'t>
     {
         Merger { local_tree,
@@ -100,9 +94,9 @@ impl<'t> Merger<'t> {
 
     pub fn merge(&mut self) -> Result<MergedNode<'t>> {
         let merged_root_node = {
-            let local_root_node = self.local_tree.node_for_guid(ROOT_GUID);
-            let remote_root_node = self.remote_tree.node_for_guid(ROOT_GUID);
-            self.merge_node(ROOT_GUID, local_root_node, remote_root_node)?
+            let local_root_node = self.local_tree.node_for_guid(&ROOT_GUID);
+            let remote_root_node = self.remote_tree.node_for_guid(&ROOT_GUID);
+            self.merge_node(ROOT_GUID.clone(), local_root_node, remote_root_node)?
         };
 
         // Any remaining deletions on one side should be deleted on the other side.
@@ -111,12 +105,12 @@ impl<'t> Merger<'t> {
         // aren't on the server.
         for guid in self.local_tree.deletions() {
             if !self.mentions(guid) {
-                self.delete_remotely.insert(guid.to_string());
+                self.delete_remotely.insert(guid.clone());
             }
         }
         for guid in self.remote_tree.deletions() {
             if !self.mentions(guid) {
-                self.delete_locally.insert(guid.to_string());
+                self.delete_locally.insert(guid.clone());
             }
         }
 
@@ -128,7 +122,7 @@ impl<'t> Merger<'t> {
     }
 
     #[inline]
-    fn mentions(&self, guid: &str) -> bool {
+    fn mentions(&self, guid: &Guid) -> bool {
         self.merged_guids.contains(guid) ||
         self.delete_locally.contains(guid) ||
         self.delete_remotely.contains(guid)
@@ -136,12 +130,12 @@ impl<'t> Merger<'t> {
 
     /// Merges two nodes, recursively walking folders.
     fn merge_node(&mut self,
-                  merged_guid: &str,
+                  merged_guid: Guid,
                   local_node: Option<Node<'t>>,
                   remote_node: Option<Node<'t>>)
                   -> Result<MergedNode<'t>>
     {
-        self.merged_guids.insert(merged_guid.to_string());
+        self.merged_guids.insert(merged_guid.clone());
 
         match (local_node, remote_node) {
             (Some(local_node), Some(remote_node)) => {
@@ -151,7 +145,7 @@ impl<'t> Merger<'t> {
                        remote_node);
                 if local_node.guid != merged_guid {
                     // We deduped a NEW local item to a remote item.
-                    self.merged_guids.insert(local_node.guid.to_string());
+                    self.merged_guids.insert(local_node.guid.clone());
                 }
                 let merged_node = self.two_way_merge(merged_guid, local_node, remote_node)?;
                 Ok(merged_node)
@@ -162,10 +156,10 @@ impl<'t> Merger<'t> {
                        local_node);
                 if local_node.guid != merged_guid {
                     // We deduped a NEW local item to a remote item.
-                    self.merged_guids.insert(local_node.guid.to_string());
+                    self.merged_guids.insert(local_node.guid.clone());
                 }
                 let mut merged_node =
-                    MergedNode::new(merged_guid.to_string(), MergeState::local(local_node));
+                    MergedNode::new(merged_guid.clone(), MergeState::local(local_node));
                 if local_node.is_folder() {
                     // The local folder doesn't exist remotely, but its children might, so
                     // we still need to recursively walk and merge them. This method will
@@ -182,7 +176,7 @@ impl<'t> Merger<'t> {
                        merged_guid,
                        remote_node);
                 let mut merged_node =
-                    MergedNode::new(merged_guid.to_string(), MergeState::remote(remote_node));
+                    MergedNode::new(merged_guid.clone(), MergeState::remote(remote_node));
                 if remote_node.is_folder() {
                     // As above, a remote folder's children might still exist locally, so we
                     // need to merge them and update the merge state from remote to new if
@@ -201,15 +195,15 @@ impl<'t> Merger<'t> {
 
     /// Merges two nodes that exist locally and remotely.
     fn two_way_merge(&mut self,
-                     merged_guid: &str,
+                     merged_guid: Guid,
                      local_node: Node<'t>,
                      remote_node: Node<'t>)
                      -> Result<MergedNode<'t>>
     {
-        let merge_state = self.resolve_two_value_conflict(merged_guid, local_node, remote_node);
+        let merge_state = self.resolve_two_value_conflict(merged_guid.clone(), local_node, remote_node);
         trace!("Merge state for {} is {}", merged_guid, merge_state);
 
-        let mut merged_node = MergedNode::new(merged_guid.to_string(), merge_state);
+        let mut merged_node = MergedNode::new(merged_guid, merge_state);
 
         if !local_node.has_compatible_kind(&remote_node) {
             error!("Merging local {} and remote {} with different kinds",
@@ -239,7 +233,7 @@ impl<'t> Merger<'t> {
     /// the local GUID. The local GUID may be different if we're deduping a
     /// local item to a remote item.
     fn resolve_two_value_conflict(&mut self,
-                                  merged_guid: &str,
+                                  merged_guid: Guid,
                                   local_node: Node<'t>,
                                   remote_node: Node<'t>)
                                   -> MergeState<'t>
@@ -335,7 +329,7 @@ impl<'t> Merger<'t> {
                        remote_parent_node,
                        local_parent_node);
 
-                let merged_child_node = self.merge_node(&local_child_node.guid,
+                let merged_child_node = self.merge_node(local_child_node.guid.clone(),
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
                 merged_node.merged_children.push(merged_child_node);
@@ -376,7 +370,7 @@ impl<'t> Merger<'t> {
                            local_parent_node,
                            latest_local_age);
 
-                    let merged_child_node = self.merge_node(&remote_child_node.guid,
+                    let merged_child_node = self.merge_node(remote_child_node.guid.clone(),
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
                     merged_node.merged_children.push(merged_child_node);
@@ -394,7 +388,7 @@ impl<'t> Merger<'t> {
                     trace!("Local parent unchanged; keeping remote child {} in {}",
                            remote_child_node,
                            remote_parent_node);
-                    let merged_child_node = self.merge_node(&remote_child_node.guid,
+                    let merged_child_node = self.merge_node(remote_child_node.guid.clone(),
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
                     merged_node.merged_children.push(merged_child_node);
@@ -412,7 +406,7 @@ impl<'t> Merger<'t> {
                                                           local_parent_node,
                                                           remote_parent_node,
                                                           remote_child_node);
-            let merged_child_node = self.merge_node(&remote_child_node.guid,
+            let merged_child_node = self.merge_node(remote_child_node.guid.clone(),
                                                     local_child_node_by_content,
                                                     Some(remote_child_node))?;
             merged_node.merged_children.push(merged_child_node);
@@ -480,7 +474,7 @@ impl<'t> Merger<'t> {
                        local_parent_node,
                        remote_parent_node);
 
-                let merged_child_node = self.merge_node(&local_child_node.guid,
+                let merged_child_node = self.merge_node(local_child_node.guid.clone(),
                                                         Some(local_child_node),
                                                         Some(remote_child_node))?;
                 merged_node.merged_children.push(merged_child_node);
@@ -517,7 +511,7 @@ impl<'t> Merger<'t> {
                            remote_parent_node,
                            latest_remote_age);
 
-                    let merged_child_node = self.merge_node(&local_child_node.guid,
+                    let merged_child_node = self.merge_node(local_child_node.guid.clone(),
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
                     merged_node.merged_children.push(merged_child_node);
@@ -528,7 +522,7 @@ impl<'t> Merger<'t> {
                            local_child_node,
                            local_parent_node);
 
-                    let merged_child_node = self.merge_node(&local_child_node.guid,
+                    let merged_child_node = self.merge_node(local_child_node.guid.clone(),
                                                             Some(local_child_node),
                                                             Some(remote_child_node))?;
                     merged_node.merged_children.push(merged_child_node);
@@ -555,7 +549,7 @@ impl<'t> Merger<'t> {
             {
                 // The local child has a remote content match, so take the remote GUID
                 // and merge.
-                let merged_child_node = self.merge_node(&remote_child_node_by_content.guid,
+                let merged_child_node = self.merge_node(remote_child_node_by_content.guid.clone(),
                                                         Some(local_child_node),
                                                         Some(remote_child_node_by_content))?;
                 merged_node.merged_children.push(merged_child_node);
@@ -564,7 +558,7 @@ impl<'t> Merger<'t> {
                 // The local child doesn't exist remotely, but we still need to walk
                 // its children.
                 let merged_child_node =
-                    self.merge_node(&local_child_node.guid, Some(local_child_node), None)?;
+                    self.merge_node(local_child_node.guid.clone(), Some(local_child_node), None)?;
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(true);
             }
@@ -711,7 +705,7 @@ impl<'t> Merger<'t> {
         if !remote_node.is_syncable {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it from the server, even if it's syncable locally.
-            self.delete_remotely.insert(remote_node.guid.to_string());
+            self.delete_remotely.insert(remote_node.guid.clone());
             if remote_node.is_folder() {
                 // If the remote node is a folder, we also need to walk its descendants
                 // and reparent any syncable descendants, and descendants that only
@@ -727,7 +721,7 @@ impl<'t> Merger<'t> {
                     // The remote node is syncable, but the local node is non-syncable.
                     // For consistency with Desktop, we unconditionally delete the
                     // node from the server.
-                    self.delete_remotely.insert(remote_node.guid.to_string());
+                    self.delete_remotely.insert(remote_node.guid.clone());
                     if remote_node.is_folder() {
                         self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
                     }
@@ -770,7 +764,7 @@ impl<'t> Merger<'t> {
 
         // Take the local deletion and relocate any new remote descendants to the
         // merged node.
-        self.delete_remotely.insert(remote_node.guid.to_string());
+        self.delete_remotely.insert(remote_node.guid.clone());
         if remote_node.is_folder() {
             self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
         }
@@ -791,7 +785,7 @@ impl<'t> Merger<'t> {
         if !local_node.is_syncable {
             // If the local node is known to be non-syncable, we unconditionally
             // delete it from the local tree, even if it's syncable remotely.
-            self.delete_locally.insert(local_node.guid.to_string());
+            self.delete_locally.insert(local_node.guid.clone());
             if local_node.is_folder() {
                 self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
             }
@@ -805,7 +799,7 @@ impl<'t> Merger<'t> {
                     // This can happen if we applied an orphaned left pane query in a
                     // previous sync, and later saw the left pane root on the server.
                     // Since we now have the complete subtree, we can remove the item.
-                    self.delete_locally.insert(local_node.guid.to_string());
+                    self.delete_locally.insert(local_node.guid.clone());
                     if remote_node.is_folder() {
                         self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
                     }
@@ -842,7 +836,7 @@ impl<'t> Merger<'t> {
 
         // Take the remote deletion and relocate any new local descendants to the
         // merged node.
-        self.delete_locally.insert(local_node.guid.to_string());
+        self.delete_locally.insert(local_node.guid.clone());
         if local_node.is_folder() {
             self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
         }
@@ -876,7 +870,7 @@ impl<'t> Merger<'t> {
                            remote_child_node,
                            merged_node);
                     let local_child_node = self.local_tree.node_for_guid(&remote_child_node.guid);
-                    let mut merged_orphan_node = self.merge_node(&remote_child_node.guid,
+                    let mut merged_orphan_node = self.merge_node(remote_child_node.guid.clone(),
                                                                  local_child_node,
                                                                  Some(remote_child_node))?;
 
@@ -915,7 +909,7 @@ impl<'t> Merger<'t> {
                            local_child_node,
                            merged_node);
                     let remote_child_node = self.remote_tree.node_for_guid(&local_child_node.guid);
-                    let mut merged_orphan_node = self.merge_node(&local_child_node.guid,
+                    let mut merged_orphan_node = self.merge_node(local_child_node.guid.clone(),
                                                                  Some(local_child_node),
                                                                  remote_child_node)?;
 
@@ -1004,9 +998,9 @@ impl<'t> Merger<'t> {
                         trace!("Deduping local child {} to remote child {}",
                                local_child_node,
                                remote_child_node);
-                        local_to_remote.insert(local_child_node.guid.to_string(),
+                        local_to_remote.insert(local_child_node.guid.clone(),
                                                remote_child_node);
-                        remote_to_local.insert(remote_child_node.guid.to_string(),
+                        remote_to_local.insert(remote_child_node.guid.clone(),
                                                local_child_node);
                     } else {
                         trace!("Not deduping remote child {}; no remaining local content matches",
@@ -1045,7 +1039,7 @@ impl<'t> Merger<'t> {
             let new_remote_node =
                 {
                     let (local_to_remote, _) = matching_dupes_by_local_parent_guid
-                    .entry(local_parent_node.guid.to_string())
+                    .entry(local_parent_node.guid.clone())
                     .or_insert_with(|| {
                         trace!("First local child {} doesn't exist remotely; finding all \
                                 matching dupes in local {} and remote {}",
@@ -1092,7 +1086,7 @@ impl<'t> Merger<'t> {
             let new_local_node =
                 {
                     let (_, remote_to_local) = matching_dupes_by_local_parent_guid
-                    .entry(local_parent_node.guid.to_string())
+                    .entry(local_parent_node.guid.clone())
                     .or_insert_with(|| {
                         trace!("First remote child {} doesn't exist locally; finding all \
                                 matching dupes in local {} and remote {}",
@@ -1138,28 +1132,28 @@ mod tests {
 
     impl Into<Tree> for Node {
         fn into(self) -> Tree {
-            fn inflate(tree: &mut Tree, parent_guid: &str, node: Node) {
-                let guid = node.item.guid.clone();
-                tree.insert(parent_guid, node.item);
+            fn inflate(tree: &mut Tree, parent_guid: Guid, node: Node) {
+                let guid = node.item.guid;
+                tree.insert(&parent_guid, node.item);
                 node.children
                     .into_iter()
-                    .for_each(|child| inflate(tree, &guid, *child))
+                    .for_each(|child| inflate(tree, guid, *child))
             }
 
-            let guid = self.item.guid.clone();
+            let guid = self.item.guid;
             let mut tree = Tree::new(self.item);
             self.children
                 .into_iter()
-                .for_each(|child| inflate(&mut tree, &guid, *child));
+                .for_each(|child| inflate(&mut tree, guid, *child));
             tree
         }
     }
 
     macro_rules! nodes {
         ($children:tt) => { nodes!(ROOT_GUID, Folder, $children) };
-        ($guid:expr, $kind:ident) => { nodes!($guid, $kind[]) };
+        ($guid:expr, $kind:ident) => { nodes!(Guid::from($guid), $kind[]) };
         ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
-            let mut item = Item::new($guid, Kind::$kind);
+            let mut item = Item::new(Guid::from($guid), Kind::$kind);
             $({ item.$name = $value; })*
             Node { item, children: Vec::new() }
         }};
@@ -1536,7 +1530,7 @@ mod tests {
                 })
             })
         }).into();
-        local_tree.note_deleted("folderEEEEEE");
+        local_tree.note_deleted("folderEEEEEE".into());
         let new_local_contents = HashMap::new();
 
         // Remotely: delete B, add E > G.
@@ -1554,7 +1548,7 @@ mod tests {
                 })
             })
         }).into();
-        remote_tree.note_deleted("folderBBBBBB");
+        remote_tree.note_deleted("folderBBBBBB".into());
         let new_remote_contents = HashMap::new();
 
         let mut merger = Merger::new(&local_tree,
@@ -1597,7 +1591,7 @@ mod tests {
                 ("bookmarkAAA3", Bookmark[needs_merge = true])
             })
         }).into();
-        let mut new_local_contents: HashMap<String, Content> = HashMap::new();
+        let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
         new_local_contents.insert("bookmarkAAA1".into(),
                                   Content::Bookmark { title: "A".into(),
                                                       url_href: "http://example.com/a".into(), });
@@ -1615,7 +1609,7 @@ mod tests {
                 ("bookmarkAAA5", Bookmark)
             })
         }).into();
-        let mut new_remote_contents: HashMap<String, Content> = HashMap::new();
+        let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
         new_remote_contents.insert("bookmarkAAAA".into(),
                                    Content::Bookmark { title: "A".into(),
                                                        url_href: "http://example.com/a".into(), });

@@ -7,6 +7,8 @@ use std::{cmp::{Eq, PartialEq},
           fmt,
           ops::Deref};
 
+use guid::Guid;
+
 /// A complete, rooted bookmark tree with tombstones.
 ///
 /// The tree stores bookmark nodes in a vector, and uses indices in the vector
@@ -17,15 +19,15 @@ use std::{cmp::{Eq, PartialEq},
 #[derive(Debug)]
 pub struct Tree {
     entries: Vec<Entry>,
-    index_by_guid: HashMap<String, usize>,
-    deleted_guids: HashSet<String>,
+    index_by_guid: HashMap<Guid, usize>,
+    deleted_guids: HashSet<Guid>,
 }
 
 impl Tree {
     /// Constructs a new rooted tree.
     pub fn new(root: Item) -> Tree {
         let mut index_by_guid = HashMap::new();
-        index_by_guid.insert(root.guid.to_string(), 0);
+        index_by_guid.insert(root.guid, 0);
         Tree { entries: vec![Entry { parent_index: None,
                                      item: root,
                                      level: 0,
@@ -34,40 +36,36 @@ impl Tree {
                deleted_guids: HashSet::new(), }
     }
 
-    pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &str> + 't {
-        self.deleted_guids.iter().map(move |guid| guid.as_ref())
+    pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
+        self.deleted_guids.iter()
     }
 
-    pub fn is_deleted(&self, guid: &str) -> bool {
+    pub fn is_deleted(&self, guid: &Guid) -> bool {
         self.deleted_guids.contains(guid)
     }
 
-    pub fn note_deleted<T>(&mut self, guid: T)
-        where T: Into<String> {
-        self.deleted_guids.insert(guid.into());
+    pub fn note_deleted(&mut self, guid: Guid) {
+        self.deleted_guids.insert(guid);
     }
 
-    pub fn guids<'t>(&'t self) -> impl Iterator<Item = &str> + 't {
+    pub fn guids<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
         self.index_by_guid
             .keys()
             .chain(self.deleted_guids.iter())
-            .map(move |guid| guid.as_ref())
     }
 
-    pub fn node_for_guid<T>(&self, guid: T) -> Option<Node>
-        where T: AsRef<str> {
+    pub fn node_for_guid(&self, guid: &Guid) -> Option<Node> {
         self.index_by_guid
-            .get(guid.as_ref())
+            .get(guid)
             .map(|index| self.node(*index))
     }
 
-    pub fn insert<T>(&mut self, parent_guid: T, item: Item)
-        where T: AsRef<str> {
+    pub fn insert(&mut self, parent_guid: &Guid, item: Item) {
         assert!(!self.index_by_guid.contains_key(&item.guid),
                 "Entry {} already exists in tree",
                 &item.guid);
         let child_index = self.entries.len();
-        let (parent_index, level) = match self.index_by_guid.get(parent_guid.as_ref()) {
+        let (parent_index, level) = match self.index_by_guid.get(&parent_guid) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
                 assert!(parent.item.is_folder(),
@@ -77,10 +75,10 @@ impl Tree {
                 parent.child_indices.push(child_index);
                 (*parent_index, parent.level + 1)
             },
-            None => panic!("Missing parent {} for {}", &item.guid, parent_guid.as_ref()),
+            None => panic!("Missing parent {} for {}", &item.guid, parent_guid),
         };
         self.index_by_guid
-            .insert(item.guid.to_string(), child_index);
+            .insert(item.guid, child_index);
         self.entries.push(Entry { parent_index: Some(parent_index),
                                   item,
                                   level,
@@ -163,24 +161,24 @@ impl<'t> From<MergedNode<'t>> for Tree {
         fn to_item<'t>(node: &MergedNode<'t>) -> Item {
             let value_state = node.merge_state.value();
             let decided_value = value_state.node();
-            let mut item = Item::new(&node.guid, decided_value.kind);
+            let mut item = Item::new(node.guid, decided_value.kind);
             item.age = decided_value.age;
             item
         }
 
-        fn inflate<'t>(tree: &mut Tree, parent_guid: &str, node: MergedNode<'t>) {
-            let guid = node.guid.clone();
-            tree.insert(parent_guid, to_item(&node));
+        fn inflate<'t>(tree: &mut Tree, parent_guid: Guid, node: MergedNode<'t>) {
+            let guid = node.guid;
+            tree.insert(&parent_guid, to_item(&node));
             node.merged_children
                 .into_iter()
-                .for_each(|merged_child_node| inflate(tree, &guid, merged_child_node));
+                .for_each(|merged_child_node| inflate(tree, guid, merged_child_node));
         }
 
-        let guid = root.guid.clone();
+        let guid = root.guid;
         let mut tree = Tree::new(to_item(&root));
         root.merged_children
             .into_iter()
-            .for_each(|merged_child_node| inflate(&mut tree, &guid, merged_child_node));
+            .for_each(|merged_child_node| inflate(&mut tree, guid, merged_child_node));
         tree
     }
 }
@@ -275,7 +273,7 @@ impl<'t> fmt::Display for Node<'t> {
 /// An item in a local or remote bookmark tree.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Item {
-    pub guid: String,
+    pub guid: Guid,
     pub age: i64,
     pub kind: Kind,
     pub needs_merge: bool,
@@ -283,8 +281,8 @@ pub struct Item {
 }
 
 impl Item {
-    pub fn new(guid: &str, kind: Kind) -> Item {
-        Item { guid: guid.to_string(),
+    pub fn new(guid: Guid, kind: Kind) -> Item {
+        Item { guid: guid,
                kind,
                age: 0,
                needs_merge: false,
@@ -348,13 +346,13 @@ impl fmt::Display for Kind {
 /// child nodes.
 #[derive(Debug)]
 pub struct MergedNode<'t> {
-    pub guid: String,
+    pub guid: Guid,
     pub merge_state: MergeState<'t>,
     pub merged_children: Vec<MergedNode<'t>>,
 }
 
 impl<'t> MergedNode<'t> {
-    pub fn new(guid: String, merge_state: MergeState<'t>) -> MergedNode<'t> {
+    pub fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
         MergedNode { guid,
                      merge_state,
                      merged_children: Vec::new(), }
