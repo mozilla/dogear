@@ -34,11 +34,8 @@ impl Tree {
                deleted_guids: HashSet::new(), }
     }
 
-    pub fn deletions(&self) -> Vec<&str> {
-        self.deleted_guids
-            .iter()
-            .map(|guid| guid.as_ref())
-            .collect()
+    pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &str> + 't {
+        self.deleted_guids.iter().map(move |guid| guid.as_ref())
     }
 
     pub fn is_deleted(&self, guid: &str) -> bool {
@@ -50,12 +47,11 @@ impl Tree {
         self.deleted_guids.insert(guid.into());
     }
 
-    pub fn guids(&self) -> Vec<&str> {
+    pub fn guids<'t>(&'t self) -> impl Iterator<Item = &str> + 't {
         self.index_by_guid
             .keys()
-            .map(|guid| guid.as_ref())
-            .chain(self.deleted_guids.iter().map(|guid| guid.as_ref()))
-            .collect()
+            .chain(self.deleted_guids.iter())
+            .map(move |guid| guid.as_ref())
     }
 
     pub fn node_for_guid<T>(&self, guid: T) -> Option<Node>
@@ -202,12 +198,11 @@ struct Entry {
 pub struct Node<'t>(&'t Tree, &'t Entry);
 
 impl<'t> Node<'t> {
-    pub fn children(&self) -> Vec<Node<'t>> {
+    pub fn children<'n>(&'n self) -> impl Iterator<Item = Node<'t>> + 'n {
         self.1
             .child_indices
             .iter()
-            .map(|index| self.0.node(*index))
-            .collect()
+            .map(move |index| self.0.node(*index))
     }
 
     pub fn parent(&self) -> Option<Node<'t>> {

@@ -124,7 +124,7 @@ impl<'t> Merger<'t> {
     }
 
     pub fn subsumes(&self, tree: &Tree) -> bool {
-        tree.guids().iter().all(|guid| self.mentions(guid))
+        tree.guids().all(|guid| self.mentions(guid))
     }
 
     #[inline]
