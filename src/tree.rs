@@ -92,6 +92,7 @@ impl Tree {
     }
 }
 
+#[cfg(test)]
 impl PartialEq for Tree {
     fn eq(&self, other: &Tree) -> bool {
         if self.index_by_guid.len() != other.index_by_guid.len() {
@@ -137,8 +138,6 @@ impl PartialEq for Tree {
         true
     }
 }
-
-impl Eq for Tree {}
 
 impl<'t> From<MergedNode<'t>> for Tree {
     fn from(root: MergedNode<'t>) -> Self {
