@@ -63,17 +63,17 @@ impl Tree {
 
     pub fn insert<T>(&mut self, parent_guid: T, item: Item)
         where T: AsRef<str> {
-        if self.index_by_guid.contains_key(&item.guid) {
-            panic!("Entry {} already exists in tree", &item.guid);
-        }
+        assert!(!self.index_by_guid.contains_key(&item.guid),
+                "Entry {} already exists in tree",
+                &item.guid);
         let child_index = self.entries.len();
         let (parent_index, level) = match self.index_by_guid.get(parent_guid.as_ref()) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
-                if !parent.item.is_folder() {
-                    panic!("Can't insert {} into non-folder {}",
-                           &item.guid, &parent.item.guid);
-                }
+                assert!(parent.item.is_folder(),
+                        "Can't insert {} into non-folder {}",
+                        &item.guid,
+                        &parent.item.guid);
                 parent.child_indices.push(child_index);
                 (*parent_index, parent.level + 1)
             },
