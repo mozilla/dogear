@@ -33,17 +33,17 @@ enum StructureChange {
 
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
 pub struct StructureCounts {
-    new: u64,
+    pub new: u64,
     /// Remote non-folder change wins over local deletion.
-    remote_revives: u64,
+    pub remote_revives: u64,
     /// Local folder deletion wins over remote change.
-    local_deletes: u64,
+    pub local_deletes: u64,
     /// Local non-folder change wins over remote deletion.
-    local_revives: u64,
+    pub local_revives: u64,
     /// Remote folder deletion wins over local change.
-    remote_deletes: u64,
+    pub remote_deletes: u64,
     /// Deduped local items.
-    dupes: u64,
+    pub dupes: u64,
 }
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for

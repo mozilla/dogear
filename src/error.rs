@@ -48,6 +48,8 @@ pub enum ErrorKind {
     DuplicateItemError(Guid),
     InvalidParentError(Guid, Guid),
     MissingParentError(Guid, Guid),
+    StorageError(&'static str, u32),
+    MergeConflictError(&'static str),
 }
 
 impl fmt::Display for ErrorKind {
@@ -67,6 +69,12 @@ impl fmt::Display for ErrorKind {
             ErrorKind::MissingParentError(child_guid, parent_guid) => {
                 write!(f, "Can't insert item {} into nonexistent parent {}",
                        child_guid, parent_guid)
+            },
+            ErrorKind::StorageError(message, result) => {
+                write!(f, "Storage error: {} ({})", message, result)
+            },
+            ErrorKind::MergeConflictError(message) => {
+                write!(f, "Merge conflict: {}", message)
             },
         }
     }
