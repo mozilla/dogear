@@ -50,6 +50,8 @@ pub enum ErrorKind {
     MissingParentError(Guid, Guid),
     StorageError(&'static str, u32),
     MergeConflictError(&'static str),
+    UnmergedLocalItemsError,
+    UnmergedRemoteItemsError,
 }
 
 impl fmt::Display for ErrorKind {
@@ -76,6 +78,12 @@ impl fmt::Display for ErrorKind {
             ErrorKind::MergeConflictError(message) => {
                 write!(f, "Merge conflict: {}", message)
             },
+            ErrorKind::UnmergedLocalItemsError => {
+                write!(f, "Merged tree doesn't mention all items from local tree")
+            },
+            ErrorKind::UnmergedRemoteItemsError => {
+                write!(f, "Merged tree doesn't mention all items from remote tree")
+            }
         }
     }
 }

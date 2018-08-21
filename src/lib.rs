@@ -17,10 +17,12 @@ extern crate log;
 
 mod error;
 mod merge;
+mod store;
 mod tree;
 mod guid;
 
 pub use error::{Error, ErrorKind, Result};
 pub use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 pub use merge::{Deletion, Merger, StructureCounts};
+pub use store::{Store, merge};
 pub use tree::{Content, Item, Kind, MergeState, MergedNode, StructureState, Tree, ValueState};
