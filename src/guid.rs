@@ -1,46 +1,57 @@
 use std::{fmt, str, ops};
 
-// TODO: We could store a 13th b'\0' byte for a C-compatible null terminator. Is
-// this worth doing?
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Guid([u8; 12]);
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Guid(Repr);
 
-// These are here so that we can create these as const/static (without needing lazy_static)
-pub(crate) const ROOT_GUID: Guid = Guid(*b"root________");
+/// The internal representation of a GUID. Valid GUIDs are 12 bytes, and contain
+/// only Base64url characters; we can store them on the stack without a heap
+/// allocation. However, both local and remote items might have invalid GUIDs,
+/// in which case we fall back to a heap-allocated string.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+enum Repr {
+    Fast([u8; 12]),
+    Slow(String),
+}
 
+/// The Places root GUID, used to root all items in a bookmark tree.
+pub(crate) const ROOT_GUID: Guid = Guid(Repr::Fast(*b"root________"));
+
+/// The syncable Places roots. All synced items should descend from these
+/// roots.
 pub(crate) const USER_CONTENT_ROOTS: [Guid; 4] = [
-    Guid(*b"toolbar_____"),
-    Guid(*b"menu________"),
-    Guid(*b"unfiled_____"),
-    Guid(*b"mobile______"),
+    Guid(Repr::Fast(*b"toolbar_____")),
+    Guid(Repr::Fast(*b"menu________")),
+    Guid(Repr::Fast(*b"unfiled_____")),
+    Guid(Repr::Fast(*b"mobile______")),
 ];
+
+const VALID_GUID_BYTES: [u8; 128] =
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+     0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+     0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+     0, 0, 0, 0];
 
 impl Guid {
     #[inline]
-    pub fn try_new(s: &str) -> Option<Guid> {
-        if !Guid::is_valid(s) {
-            None
-        } else {
-            assert!(s.is_char_boundary(12));
-            let mut guid = Guid([0u8; 12]);
-            guid.0.copy_from_slice(s.as_bytes());
-            Some(guid)
-        }
-    }
-
-
-    #[inline]
     pub fn new(s: &str) -> Guid {
-        match Guid::try_new(s) {
-            Some(g) => g,
-            // We don't get to format the string passed to e.g. `expect`.
-            None => panic!("Invalid guid: {:?}", s)
-        }
+        let repr = if Guid::is_valid(s) {
+            assert!(s.is_char_boundary(12));
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(s.as_bytes());
+            Repr::Fast(bytes)
+        } else {
+            Repr::Slow(s.into())
+        };
+        Guid(repr)
     }
 
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        match self.0 {
+            Repr::Fast(ref bytes) => bytes,
+            Repr::Slow(ref s) => s.as_ref(),
+        }
     }
 
     #[inline]
@@ -50,18 +61,17 @@ impl Guid {
         // already this is valid utf8, since we know that we only ever create
         // these while respecting is_valid (and moreover, we assert that
         // `s.is_char_boundary(12)` above).
-        str::from_utf8(self.as_bytes()).unwrap()
+        match self.0 {
+            Repr::Fast(ref bytes) => str::from_utf8(bytes).unwrap(),
+            Repr::Slow(ref s) => s,
+        }
     }
 
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
     pub fn is_valid(s: &str) -> bool {
-        s.len() == 12 && s.as_bytes().iter().all(|&byte|
-            // TODO: we should use a 256 entry lookup table.
-            (b'0' <= byte && byte <= b'9') ||
-            (b'a' <= byte && byte <= b'z') ||
-            (b'A' <= byte && byte <= b'Z') ||
-            b'-' == byte || b'_' == byte
+        s.len() == 12 && s.as_bytes().iter().all(
+            |&byte| VALID_GUID_BYTES[(byte & 0x7f) as usize] == 1
         )
     }
 }
@@ -89,6 +99,7 @@ impl AsRef<[u8]> for Guid {
 
 impl ops::Deref for Guid {
     type Target = str;
+
     #[inline]
     fn deref(&self) -> &str {
         self.as_str()
@@ -120,4 +131,3 @@ impl fmt::Display for Guid {
         fmt::Display::fmt(self.as_str(), f)
     }
 }
-

@@ -27,7 +27,7 @@ impl Tree {
     /// Constructs a new rooted tree.
     pub fn new(root: Item) -> Tree {
         let mut index_by_guid = HashMap::new();
-        index_by_guid.insert(root.guid, 0);
+        index_by_guid.insert(root.guid.clone(), 0);
         Tree { entries: vec![Entry { parent_index: None,
                                      item: root,
                                      level: 0,
@@ -77,8 +77,7 @@ impl Tree {
             },
             None => panic!("Missing parent {} for {}", &item.guid, parent_guid),
         };
-        self.index_by_guid
-            .insert(item.guid, child_index);
+        self.index_by_guid.insert(item.guid.clone(), child_index);
         self.entries.push(Entry { parent_index: Some(parent_index),
                                   item,
                                   level,
@@ -161,24 +160,24 @@ impl<'t> From<MergedNode<'t>> for Tree {
         fn to_item<'t>(node: &MergedNode<'t>) -> Item {
             let value_state = node.merge_state.value();
             let decided_value = value_state.node();
-            let mut item = Item::new(node.guid, decided_value.kind);
+            let mut item = Item::new(node.guid.clone(), decided_value.kind);
             item.age = decided_value.age;
             item
         }
 
-        fn inflate<'t>(tree: &mut Tree, parent_guid: Guid, node: MergedNode<'t>) {
-            let guid = node.guid;
+        fn inflate<'t>(tree: &mut Tree, parent_guid: &Guid, node: MergedNode<'t>) {
+            let guid = node.guid.clone();
             tree.insert(&parent_guid, to_item(&node));
             node.merged_children
                 .into_iter()
-                .for_each(|merged_child_node| inflate(tree, guid, merged_child_node));
+                .for_each(|merged_child_node| inflate(tree, &guid, merged_child_node));
         }
 
-        let guid = root.guid;
+        let guid = root.guid.clone();
         let mut tree = Tree::new(to_item(&root));
         root.merged_children
             .into_iter()
-            .for_each(|merged_child_node| inflate(&mut tree, guid, merged_child_node));
+            .for_each(|merged_child_node| inflate(&mut tree, &guid, merged_child_node));
         tree
     }
 }
@@ -282,7 +281,7 @@ pub struct Item {
 
 impl Item {
     pub fn new(guid: Guid, kind: Kind) -> Item {
-        Item { guid: guid,
+        Item { guid,
                kind,
                age: 0,
                needs_merge: false,

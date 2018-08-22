@@ -200,7 +200,8 @@ impl<'t> Merger<'t> {
                      remote_node: Node<'t>)
                      -> Result<MergedNode<'t>>
     {
-        let merge_state = self.resolve_two_value_conflict(merged_guid.clone(), local_node, remote_node);
+        let merge_state = self.resolve_two_value_conflict(merged_guid.clone(), local_node,
+                                                          remote_node);
         trace!("Merge state for {} is {}", merged_guid, merge_state);
 
         let mut merged_node = MergedNode::new(merged_guid, merge_state);
@@ -1132,19 +1133,19 @@ mod tests {
 
     impl Into<Tree> for Node {
         fn into(self) -> Tree {
-            fn inflate(tree: &mut Tree, parent_guid: Guid, node: Node) {
-                let guid = node.item.guid;
+            fn inflate(tree: &mut Tree, parent_guid: &Guid, node: Node) {
+                let guid = node.item.guid.clone();
                 tree.insert(&parent_guid, node.item);
                 node.children
                     .into_iter()
-                    .for_each(|child| inflate(tree, guid, *child))
+                    .for_each(|child| inflate(tree, &guid, *child))
             }
 
-            let guid = self.item.guid;
+            let guid = self.item.guid.clone();
             let mut tree = Tree::new(self.item);
             self.children
                 .into_iter()
-                .for_each(|child| inflate(&mut tree, guid, *child));
+                .for_each(|child| inflate(&mut tree, &guid, *child));
             tree
         }
     }
@@ -1631,6 +1632,60 @@ mod tests {
                 ("bookmarkAAA4", Bookmark),
                 ("bookmarkAAA3", Bookmark),
                 ("bookmarkAAA5", Bookmark)
+            })
+        }).into();
+        let merged_tree: Tree = merged_root.into();
+        assert_eq!(merged_tree, expected_tree);
+    }
+
+    #[test]
+    fn invalid_guids() {
+        before_each();
+
+        let local_tree: Tree = nodes!({
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5]),
+                ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5])
+            }),
+            ("menu________", Folder[needs_merge = true], {
+                ("shortGUID", Bookmark[needs_merge = true]),
+                ("loooooongGUID", Bookmark[needs_merge = true])
+            })
+        }).into();
+        let new_local_contents = HashMap::new();
+
+        let remote_tree: Tree = nodes!({
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("!@#$%^", Bookmark[needs_merge = true, age = 5]),
+                ("shortGUID", Bookmark[needs_merge = true, age = 5]),
+                ("", Bookmark[needs_merge = true, age = 5]),
+                ("loooooongGUID", Bookmark[needs_merge = true, age = 5])
+            }),
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true]),
+                ("bookmarkBBBB", Bookmark[needs_merge = true])
+            })
+        }).into();
+        let new_remote_contents = HashMap::new();
+
+        let mut merger = Merger::new(&local_tree,
+                                     &new_local_contents,
+                                     &remote_tree,
+                                     &new_remote_contents);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree: Tree = nodes!({
+            ("toolbar_____", Folder[age = 5], {
+                ("!@#$%^", Bookmark[age = 5]),
+                ("", Bookmark[age = 5])
+            }),
+            ("menu________", Folder, {
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkBBBB", Bookmark),
+                ("shortGUID", Bookmark),
+                ("loooooongGUID", Bookmark)
             })
         }).into();
         let merged_tree: Tree = merged_root.into();
