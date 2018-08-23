@@ -2,6 +2,7 @@
 name = "vellum"
 version = "0.1.0"
 authors = ["Lina Cambridge <lina@mozilla.com>"]
+license = "Apache-2.0"
 
 [dependencies]
 failure = "0.1.1"
