@@ -17,6 +17,7 @@ use std::{cmp::{Eq, PartialEq},
           fmt,
           ops::Deref};
 
+use error::{ErrorKind, Result};
 use guid::Guid;
 
 /// A complete, rooted bookmark tree with tombstones.
@@ -70,28 +71,30 @@ impl Tree {
             .map(|index| self.node(*index))
     }
 
-    pub fn insert(&mut self, parent_guid: &Guid, item: Item) {
-        assert!(!self.index_by_guid.contains_key(&item.guid),
-                "Entry {} already exists in tree",
-                &item.guid);
+    pub fn insert(&mut self, parent_guid: &Guid, item: Item) -> Result<()> {
+        if self.index_by_guid.contains_key(&item.guid) {
+            return Err(ErrorKind::DuplicateItemError(item.guid.clone()).into());
+        }
         let child_index = self.entries.len();
         let (parent_index, level) = match self.index_by_guid.get(&parent_guid) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
-                assert!(parent.item.is_folder(),
-                        "Can't insert {} into non-folder {}",
-                        &item.guid,
-                        &parent.item.guid);
+                if !parent.item.is_folder() {
+                    return Err(ErrorKind::InvalidParentError(item.guid.clone(),
+                                                             parent.item.guid.clone()).into());
+                }
                 parent.child_indices.push(child_index);
                 (*parent_index, parent.level + 1)
             },
-            None => panic!("Missing parent {} for {}", &item.guid, parent_guid),
+            None => return Err(ErrorKind::MissingParentError(item.guid.clone(),
+                                                             parent_guid.clone()).into()),
         };
         self.index_by_guid.insert(item.guid.clone(), child_index);
         self.entries.push(Entry { parent_index: Some(parent_index),
                                   item,
                                   level,
                                   child_indices: Vec::new(), });
+        Ok(())
     }
 
     fn node(&self, index: usize) -> Node {
@@ -162,33 +165,6 @@ impl PartialEq for Tree {
             }
         }
         true
-    }
-}
-
-impl<'t> From<MergedNode<'t>> for Tree {
-    fn from(root: MergedNode<'t>) -> Self {
-        fn to_item<'t>(node: &MergedNode<'t>) -> Item {
-            let value_state = node.merge_state.value();
-            let decided_value = value_state.node();
-            let mut item = Item::new(node.guid.clone(), decided_value.kind);
-            item.age = decided_value.age;
-            item
-        }
-
-        fn inflate<'t>(tree: &mut Tree, parent_guid: &Guid, node: MergedNode<'t>) {
-            let guid = node.guid.clone();
-            tree.insert(&parent_guid, to_item(&node));
-            node.merged_children
-                .into_iter()
-                .for_each(|merged_child_node| inflate(tree, &guid, merged_child_node));
-        }
-
-        let guid = root.guid.clone();
-        let mut tree = Tree::new(to_item(&root));
-        root.merged_children
-            .into_iter()
-            .for_each(|merged_child_node| inflate(&mut tree, &guid, merged_child_node));
-        tree
     }
 }
 
@@ -365,6 +341,32 @@ impl<'t> MergedNode<'t> {
         MergedNode { guid,
                      merge_state,
                      merged_children: Vec::new(), }
+    }
+
+    pub fn into_tree(self) -> Result<Tree> {
+        fn to_item<'t>(node: &MergedNode<'t>) -> Item {
+            let value_state = node.merge_state.value();
+            let decided_value = value_state.node();
+            let mut item = Item::new(node.guid.clone(), decided_value.kind);
+            item.age = decided_value.age;
+            item
+        }
+
+        fn inflate<'t>(tree: &mut Tree, parent_guid: &Guid, node: MergedNode<'t>) -> Result<()> {
+            let guid = node.guid.clone();
+            tree.insert(&parent_guid, to_item(&node))?;
+            for merged_child_node in node.merged_children.into_iter() {
+                inflate(tree, &guid, merged_child_node)?;
+            }
+            Ok(())
+        }
+
+        let guid = self.guid.clone();
+        let mut tree = Tree::new(to_item(&self));
+        for merged_child_node in self.merged_children.into_iter() {
+            inflate(&mut tree, &guid, merged_child_node)?;
+        }
+        Ok(tree)
     }
 
     pub fn to_ascii_string(&self) -> String {

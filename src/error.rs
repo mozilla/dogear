@@ -16,6 +16,8 @@ use std::{fmt, result};
 
 use failure::{Backtrace, Context, Fail};
 
+use guid::Guid;
+
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -65,4 +67,13 @@ impl From<Context<ErrorKind>> for Error {
 pub enum ErrorKind {
     #[fail(display = "{}", _0)]
     ConsistencyError(&'static str),
+
+    #[fail(display = "Item {} already exists in tree", _0)]
+    DuplicateItemError(Guid),
+
+    #[fail(display = "Can't insert item {} into non-folder {}", _0, _1)]
+    InvalidParentError(Guid, Guid),
+
+    #[fail(display = "Can't insert item {} into nonexistent parent {}", _0, _1)]
+    MissingParentError(Guid, Guid),
 }
