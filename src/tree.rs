@@ -47,6 +47,11 @@ impl Tree {
                deleted_guids: HashSet::new(), }
     }
 
+    #[inline]
+    pub fn root(&self) -> Node {
+        self.node(0)
+    }
+
     pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
         self.deleted_guids.iter()
     }
@@ -104,7 +109,7 @@ impl Tree {
 
 impl fmt::Display for Tree {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let root = self.node(0);
+        let root = self.root();
         let deleted_guids = self.deleted_guids
                                 .iter()
                                 .map(|guid| guid.as_ref())
