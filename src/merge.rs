@@ -714,7 +714,7 @@ impl<'t> Merger<'t> {
                                                        remote_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
-        if !remote_node.is_syncable {
+        if !remote_node.is_syncable() {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it from the server, even if it's syncable locally.
             self.delete_remotely.insert(remote_node.guid.clone());
@@ -729,7 +729,7 @@ impl<'t> Merger<'t> {
 
         if !self.local_tree.is_deleted(&remote_node.guid) {
             if let Some(local_node) = self.local_tree.node_for_guid(&remote_node.guid) {
-                if !local_node.is_syncable {
+                if !local_node.is_syncable() {
                     // The remote node is syncable, but the local node is non-syncable.
                     // For consistency with Desktop, we unconditionally delete the
                     // node from the server.
@@ -794,7 +794,7 @@ impl<'t> Merger<'t> {
                                                        local_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
-        if !local_node.is_syncable {
+        if !local_node.is_syncable() {
             // If the local node is known to be non-syncable, we unconditionally
             // delete it from the local tree, even if it's syncable remotely.
             self.delete_locally.insert(local_node.guid.clone());
@@ -806,7 +806,7 @@ impl<'t> Merger<'t> {
 
         if !self.remote_tree.is_deleted(&local_node.guid) {
             if let Some(remote_node) = self.remote_tree.node_for_guid(&local_node.guid) {
-                if !remote_node.is_syncable {
+                if !remote_node.is_syncable() {
                     // The local node is syncable, but the remote node is non-syncable.
                     // This can happen if we applied an orphaned left pane query in a
                     // previous sync, and later saw the left pane root on the server.

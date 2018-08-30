@@ -18,7 +18,7 @@ use std::{cmp::{Eq, PartialEq},
           ops::Deref};
 
 use error::{ErrorKind, Result};
-use guid::Guid;
+use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 
 /// A complete, rooted bookmark tree with tombstones.
 ///
@@ -34,15 +34,25 @@ pub struct Tree {
     deleted_guids: HashSet<Guid>,
 }
 
+impl Default for Tree {
+    fn default() -> Self {
+        Tree::new(Item::new(ROOT_GUID.clone(), Kind::Folder))
+    }
+}
+
 impl Tree {
     /// Constructs a new rooted tree.
     pub fn new(root: Item) -> Tree {
         let mut index_by_guid = HashMap::new();
         index_by_guid.insert(root.guid.clone(), 0);
-        Tree { entries: vec![Entry { parent_index: None,
-                                     item: root,
-                                     level: 0,
-                                     child_indices: Vec::new(), }],
+
+        let entries = vec![Entry { parent_index: None,
+                                   item: root,
+                                   level: 0,
+                                   is_syncable: false,
+                                   child_indices: Vec::new(), }];
+
+        Tree { entries,
                index_by_guid,
                deleted_guids: HashSet::new(), }
     }
@@ -81,7 +91,7 @@ impl Tree {
             return Err(ErrorKind::DuplicateItemError(item.guid.clone()).into());
         }
         let child_index = self.entries.len();
-        let (parent_index, level) = match self.index_by_guid.get(&parent_guid) {
+        let (parent_index, level, is_syncable) = match self.index_by_guid.get(&parent_guid) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
                 if !parent.item.is_folder() {
@@ -89,7 +99,22 @@ impl Tree {
                                                              parent.item.guid.clone()).into());
                 }
                 parent.child_indices.push(child_index);
-                (*parent_index, parent.level + 1)
+
+                // Syncable items descend from the four user content roots. Any
+                // other roots and their descendants, like the left pane root,
+                // left pane queries, and custom roots, are non-syncable.
+                //
+                // Newer Desktops should never reupload non-syncable items
+                // (bug 1274496), and should have removed them in Places
+                // migrations (bug 1310295). However, these items may be
+                // orphaned in the unfiled root, in which case they're seen as
+                // syncable locally. If the remote tree has the missing parents
+                // and roots, we'll determine that the items are non-syncable
+                // when merging, remove them locally, and mark them for deletion
+                // remotely.
+                let is_syncable = USER_CONTENT_ROOTS.contains(&item.guid) || parent.is_syncable;
+
+                (*parent_index, parent.level + 1, is_syncable)
             },
             None => return Err(ErrorKind::MissingParentError(item.guid.clone(),
                                                              parent_guid.clone()).into()),
@@ -98,6 +123,7 @@ impl Tree {
         self.entries.push(Entry { parent_index: Some(parent_index),
                                   item,
                                   level,
+                                  is_syncable,
                                   child_indices: Vec::new(), });
         Ok(())
     }
@@ -195,6 +221,7 @@ struct Entry {
     parent_index: Option<usize>,
     item: Item,
     level: u64,
+    is_syncable: bool,
     child_indices: Vec<usize>,
 }
 
@@ -218,8 +245,14 @@ impl<'t> Node<'t> {
             .map(|index| self.0.node(*index))
     }
 
+    #[inline]
     pub fn level(&self) -> u64 {
         self.1.level
+    }
+
+    #[inline]
+    pub fn is_syncable(&self) -> bool {
+        self.1.is_syncable
     }
 
     pub fn to_ascii_string(&self) -> String {
@@ -264,10 +297,9 @@ impl<'t> fmt::Display for Node<'t> {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Item {
     pub guid: Guid,
-    pub age: i64,
     pub kind: Kind,
+    pub age: i64,
     pub needs_merge: bool,
-    pub is_syncable: bool,
 }
 
 impl Item {
@@ -275,8 +307,7 @@ impl Item {
         Item { guid,
                kind,
                age: 0,
-               needs_merge: false,
-               is_syncable: true, }
+               needs_merge: false, }
     }
 
     #[inline]
