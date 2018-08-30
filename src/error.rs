@@ -15,6 +15,7 @@
 use std::{error, fmt, result};
 
 use guid::Guid;
+use tree::Kind;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -43,7 +44,7 @@ impl fmt::Display for Error {
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    ConsistencyError(&'static str),
+    MismatchedKindError(Kind, Kind),
     DuplicateItemError(Guid),
     InvalidParentError(Guid, Guid),
     MissingParentError(Guid, Guid),
@@ -52,7 +53,10 @@ pub enum ErrorKind {
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ErrorKind::ConsistencyError(err) => write!(f, "{}", err),
+            ErrorKind::MismatchedKindError(local_kind, remote_kind) => {
+                write!(f, "Can't merge local kind {} and remote kind {}",
+                       local_kind, remote_kind)
+            },
             ErrorKind::DuplicateItemError(guid) => {
                 write!(f, "Item {} already exists in tree", guid)
             },

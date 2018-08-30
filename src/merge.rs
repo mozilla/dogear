@@ -296,7 +296,7 @@ impl<'t> Merger<'t> {
         if !local_node.has_compatible_kind(&remote_node) {
             error!("Merging local {} and remote {} with different kinds",
                    local_node, remote_node);
-            return Err(ErrorKind::ConsistencyError("Can't merge different item kinds").into());
+            return Err(ErrorKind::MismatchedKindError(local_node.kind, remote_node.kind).into());
         }
 
         if local_node.is_folder() && remote_node.is_folder() {
@@ -2759,6 +2759,34 @@ mod tests {
         assert_eq!(merger.deletions().count(), 0);
 
         assert_eq!(merger.telemetry(), &expected_telem);
+    }
+
+    #[test]
+    fn mismatched_incompatible_bookmark_kinds() {
+        before_each();
+
+        let local_tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true])
+            })
+        }).into_tree().unwrap();
+
+        let remote_tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Folder[needs_merge = true, age = 5])
+            })
+        }).into_tree().unwrap();
+
+        let mut merger = Merger::new(&local_tree, &remote_tree);
+        match merger.merge() {
+            Ok(_) => panic!("Should not merge trees with mismatched kinds"),
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::MismatchedKindError { .. } => {},
+                    kind => panic!("Got {:?} merging trees with mismatched kinds", kind)
+                };
+            }
+        };
     }
 
     #[test]

@@ -325,11 +325,6 @@ impl Item {
             // can cause it to flip kinds.
             (Kind::Bookmark, Kind::Query) => true,
             (Kind::Query, Kind::Bookmark) => true,
-
-            // A local folder can become a livemark, as the remote may have synced
-            // as a folder before the annotation was added. However, we don't allow
-            // a local livemark to "downgrade" to a folder. See bug 632287.
-            (Kind::Folder, Kind::Livemark) => true,
             (local_kind, remote_kind) => local_kind == remote_kind,
         }
     }
