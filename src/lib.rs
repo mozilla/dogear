@@ -12,11 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate failure;
-
-#[macro_use]
-extern crate failure_derive;
-
 #[macro_use]
 extern crate log;
 

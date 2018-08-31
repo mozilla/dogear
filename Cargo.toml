@@ -5,12 +5,7 @@ authors = ["Lina Cambridge <lina@mozilla.com>"]
 license = "Apache-2.0"
 
 [dependencies]
-failure_derive = "0.1.1"
 log = "0.4"
-
-[dependencies.failure]
-version = "0.1.1"
-features = ["failure_derive"]
 
 [dev-dependencies]
 env_logger = "0.5.12"

@@ -12,68 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, result};
-
-use failure::{Backtrace, Context, Fail};
+use std::{error, fmt, result};
 
 use guid::Guid;
 
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
-pub struct Error(Context<ErrorKind>);
+pub struct Error(ErrorKind);
 
-impl Fail for Error {
-    #[inline]
-    fn cause(&self) -> Option<&Fail> {
-        self.0.cause()
+impl Error {
+    pub fn kind(&self) -> &ErrorKind {
+        &self.0
     }
+}
 
-    #[inline]
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.0.backtrace()
+impl error::Error for Error {}
+
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Error {
+        Error(kind)
     }
 }
 
 impl fmt::Display for Error {
-    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        write!(f, "{}", self)
     }
 }
 
-impl Error {
-    #[inline]
-    pub fn kind(&self) -> &ErrorKind {
-        &*self.0.get_context()
-    }
-}
-
-impl From<ErrorKind> for Error {
-    #[inline]
-    fn from(kind: ErrorKind) -> Error {
-        Error(Context::new(kind))
-    }
-}
-
-impl From<Context<ErrorKind>> for Error {
-    #[inline]
-    fn from(inner: Context<ErrorKind>) -> Error {
-        Error(inner)
-    }
-}
-
-#[derive(Debug, Fail)]
+#[derive(Debug)]
 pub enum ErrorKind {
-    #[fail(display = "{}", _0)]
     ConsistencyError(&'static str),
-
-    #[fail(display = "Item {} already exists in tree", _0)]
     DuplicateItemError(Guid),
-
-    #[fail(display = "Can't insert item {} into non-folder {}", _0, _1)]
     InvalidParentError(Guid, Guid),
-
-    #[fail(display = "Can't insert item {} into nonexistent parent {}", _0, _1)]
     MissingParentError(Guid, Guid),
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ErrorKind::ConsistencyError(err) => write!(f, "{}", err),
+            ErrorKind::DuplicateItemError(guid) => {
+                write!(f, "Item {} already exists in tree", guid)
+            },
+            ErrorKind::InvalidParentError(child_guid, parent_guid) => {
+                write!(f, "Can't insert item {} into non-folder {}",
+                       child_guid, parent_guid)
+            },
+            ErrorKind::MissingParentError(child_guid, parent_guid) => {
+                write!(f, "Can't insert item {} into nonexistent parent {}",
+                       child_guid, parent_guid)
+            },
+        }
+    }
 }
