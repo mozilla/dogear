@@ -48,6 +48,13 @@ pub struct StructureCounts {
 /// remote GUIDs).
 type MatchingDupes<'t> = (HashMap<Guid, Node<'t>>, HashMap<Guid, Node<'t>>);
 
+/// Represents an accepted local or remote deletion.
+pub struct Deletion {
+    pub guid: Guid,
+    pub local_level: i64,
+    pub should_upload_tombstone: bool,
+}
+
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
 ///
@@ -142,8 +149,45 @@ impl<'t> Merger<'t> {
         Ok(merged_root_node)
     }
 
+    #[inline]
     pub fn subsumes(&self, tree: &Tree) -> bool {
         tree.guids().all(|guid| self.mentions(guid))
+    }
+
+    #[inline]
+    pub fn deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+        self.local_deletions().chain(self.remote_deletions())
+    }
+
+    fn local_deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+        self.delete_locally.iter().filter_map(move |guid| {
+            if self.delete_remotely.contains(guid) {
+                None
+            } else {
+                let local_level = self.local_tree
+                                      .node_for_guid(guid)
+                                      .map(|node| node.level())
+                                      .unwrap_or(-1);
+                // Items that should be deleted locally already have tombstones
+                // on the server, so we don't need to upload tombstones for
+                // these deletions.
+                Some(Deletion { guid: guid.clone(),
+                                local_level,
+                                should_upload_tombstone: false, })
+            }
+        })
+    }
+
+    fn remote_deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+        self.delete_remotely.iter().map(move |guid| {
+            let local_level = self.local_tree
+                                  .node_for_guid(guid)
+                                  .map(|node| node.level())
+                                  .unwrap_or(-1);
+            Deletion { guid: guid.to_owned(),
+                       local_level,
+                       should_upload_tombstone: true, }
+        })
     }
 
     #[inline]
@@ -1872,6 +1916,16 @@ mod tests {
         let expected_tree = Tree::default();
         let merged_tree = merged_root.into_tree().unwrap();
         assert_eq!(merged_tree, expected_tree);
+
+        let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+        deletions.sort_unstable();
+        assert_eq!(deletions,
+                   vec!["folderLEFTPC",
+                        "folderLEFTPF",
+                        "folderLEFTPQ",
+                        "folderLEFTPR"].into_iter()
+                                       .map(|guid| guid.into())
+                                       .collect::<Vec<Guid>>());
     }
 
     #[test]
@@ -1950,6 +2004,24 @@ mod tests {
         }).into_tree().unwrap();
         let merged_tree = merged_root.into_tree().unwrap();
         assert_eq!(merged_tree, expected_tree);
+
+        let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+        deletions.sort_unstable();
+        assert_eq!(deletions,
+                   vec!["bookmarkEEEE", // Non-syncable locally.
+                        "bookmarkFFFF", // Non-syncable locally.
+                        "bookmarkIIII", // Non-syncable remotely.
+                        "folderAAAAAA", // Non-syncable remotely.
+                        "folderDDDDDD", // Non-syncable locally.
+                        "folderLEFTPC", // Non-syncable remotely.
+                        "folderLEFTPF", // Non-syncable remotely.
+                        "folderLEFTPQ", // Non-syncable remotely.
+                        "folderLEFTPR", // Non-syncable remotely.
+                        "rootCCCCCCCC", // Non-syncable locally.
+                        "rootHHHHHHHH", // Non-syncable remotely.
+                   ].into_iter()
+                    .map(|guid| guid.into())
+                    .collect::<Vec<Guid>>());
     }
 
     #[test]

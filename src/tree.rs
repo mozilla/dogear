@@ -220,7 +220,7 @@ impl PartialEq for Tree {
 struct Entry {
     parent_index: Option<usize>,
     item: Item,
-    level: u64,
+    level: i64,
     is_syncable: bool,
     child_indices: Vec<usize>,
 }
@@ -246,7 +246,7 @@ impl<'t> Node<'t> {
     }
 
     #[inline]
-    pub fn level(&self) -> u64 {
+    pub fn level(&self) -> i64 {
         self.1.level
     }
 
