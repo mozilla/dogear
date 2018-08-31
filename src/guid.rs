@@ -126,11 +126,6 @@ impl PartialEq<str> for Guid {
     fn eq(&self, other: &str) -> bool {
         PartialEq::eq(self.as_str(), other)
     }
-
-    #[inline]
-    fn ne(&self, other: &str) -> bool {
-        PartialEq::ne(self.as_str(), other)
-    }
 }
 
 // The default Debug impl is pretty unhelpful here.

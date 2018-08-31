@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp::{Eq, PartialEq},
-          collections::{HashMap, HashSet},
+use std::{collections::{HashMap, HashSet},
           fmt,
           ops::Deref};
 
@@ -391,7 +390,7 @@ impl<'t> MergedNode<'t> {
         fn inflate<'t>(tree: &mut Tree, parent_guid: &Guid, node: MergedNode<'t>) -> Result<()> {
             let guid = node.guid.clone();
             tree.insert(&parent_guid, to_item(&node))?;
-            for merged_child_node in node.merged_children.into_iter() {
+            for merged_child_node in node.merged_children {
                 inflate(tree, &guid, merged_child_node)?;
             }
             Ok(())
@@ -399,7 +398,7 @@ impl<'t> MergedNode<'t> {
 
         let guid = self.guid.clone();
         let mut tree = Tree::new(to_item(&self));
-        for merged_child_node in self.merged_children.into_iter() {
+        for merged_child_node in self.merged_children {
             inflate(&mut tree, &guid, merged_child_node)?;
         }
         Ok(tree)
