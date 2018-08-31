@@ -31,7 +31,7 @@ enum StructureChange {
     Deleted,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
 pub struct StructureCounts {
     new: u64,
     /// Remote non-folder change wins over local deletion.
@@ -42,6 +42,8 @@ pub struct StructureCounts {
     local_revives: u64,
     /// Remote folder deletion wins over local change.
     remote_deletes: u64,
+    /// Deduped local items.
+    dupes: u64,
 }
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for
@@ -49,6 +51,7 @@ pub struct StructureCounts {
 type MatchingDupes<'t> = (HashMap<Guid, Node<'t>>, HashMap<Guid, Node<'t>>);
 
 /// Represents an accepted local or remote deletion.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Deletion {
     pub guid: Guid,
     pub local_level: i64,
@@ -77,6 +80,7 @@ pub struct Deletion {
 /// nested hierarchies, or make conflicting changes on multiple devices
 /// simultaneously. A simpler two-way tree merge strikes a good balance between
 /// correctness and complexity.
+#[derive(Debug)]
 pub struct Merger<'t> {
     local_tree: &'t Tree,
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
@@ -87,7 +91,6 @@ pub struct Merger<'t> {
     delete_locally: HashSet<Guid>,
     delete_remotely: HashSet<Guid>,
     structure_counts: StructureCounts,
-    dupe_count: u64,
 }
 
 impl<'t> Merger<'t> {
@@ -100,8 +103,7 @@ impl<'t> Merger<'t> {
                  merged_guids: HashSet::new(),
                  delete_locally: HashSet::new(),
                  delete_remotely: HashSet::new(),
-                 structure_counts: StructureCounts::default(),
-                 dupe_count: 0, }
+                 structure_counts: StructureCounts::default(), }
     }
 
     pub fn with_contents(local_tree: &'t Tree,
@@ -118,8 +120,7 @@ impl<'t> Merger<'t> {
                  merged_guids: HashSet::new(),
                  delete_locally: HashSet::new(),
                  delete_remotely: HashSet::new(),
-                 structure_counts: StructureCounts::default(),
-                 dupe_count: 0, }
+                 structure_counts: StructureCounts::default(), }
     }
 
     pub fn merge(&mut self) -> Result<MergedNode<'t>> {
@@ -147,6 +148,11 @@ impl<'t> Merger<'t> {
         }
 
         Ok(merged_root_node)
+    }
+
+    #[inline]
+    pub fn telemetry(&self) -> &StructureCounts {
+        &self.structure_counts
     }
 
     #[inline]
@@ -1120,9 +1126,9 @@ impl<'t> Merger<'t> {
                     });
                     let new_remote_node = local_to_remote.get(&local_child_node.guid);
                     new_remote_node.map(|node| {
-                                            self.dupe_count += 1;
-                                            *node
-                                        })
+                        self.structure_counts.dupes += 1;
+                        *node
+                    })
                 };
             mem::replace(&mut self.matching_dupes_by_local_parent_guid,
                          matching_dupes_by_local_parent_guid);
@@ -1167,9 +1173,9 @@ impl<'t> Merger<'t> {
                     });
                     let new_local_node = remote_to_local.get(&remote_child_node.guid);
                     new_local_node.map(|node| {
-                                           self.dupe_count += 1;
-                                           *node
-                                       })
+                        self.structure_counts.dupes += 1;
+                        *node
+                    })
                 };
             mem::replace(&mut self.matching_dupes_by_local_parent_guid,
                          matching_dupes_by_local_parent_guid);
