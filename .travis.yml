@@ -1,7 +1,36 @@
 language: rust
 rust:
   - nightly
-sudo: false
+dist: trusty
+sudo: required
+
+addons:
+  apt:
+    packages:
+      - libcurl4-openssl-dev
+      - libelf-dev
+      - libdw-dev
+      - cmake
+      - gcc
+      - binutils-dev
+      - libiberty-dev
+      - moreutils
+
+cache:
+  cargo: true
+  directories:
+    - $HOME/.src
+
+env:
+  global:
+    - KCOV_VERSION=36
+    - PATH=$HOME/.local/bin:$PATH
+
+before_install:
+  - ./.travis/before_install.sh
+
+install:
+  - ./.travis/install.sh
 
 before_script:
   - rustup component add rustfmt-preview
@@ -9,3 +38,6 @@ before_script:
 script:
   - cargo build
   - cargo test
+
+after_success:
+  - ./.travis/after_success.sh
