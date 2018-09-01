@@ -67,11 +67,11 @@ pub struct Deletion {
 /// "mirror", respectively. Overlaying buffer onto mirror yields the current
 /// server tree; overlaying local onto mirror yields the complete local tree.
 ///
-/// Vellum doesn't store the shared parent for changed items, so we can only
+/// Dogear doesn't store the shared parent for changed items, so we can only
 /// do two-way merges. Our local tree is the union of iOS's mirror and local,
 /// and our remote tree is the union of iOS's mirror and buffer.
 ///
-/// Unlike iOS, Vellum doesn't distinguish between structure and value changes.
+/// Unlike iOS, Dogear doesn't distinguish between structure and value changes.
 /// The `needs_merge` flag notes *that* a bookmark changed, but not *how*. This
 /// means we might detect conflicts, and revert changes on one side, for cases
 /// that iOS can merge cleanly.
