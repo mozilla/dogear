@@ -127,9 +127,7 @@ impl<'t> Merger<'t> {
         let merged_root_node = {
             let local_root_node = self.local_tree.root();
             let remote_root_node = self.remote_tree.root();
-            self.two_way_merge(&remote_root_node.guid,
-                               local_root_node,
-                               remote_root_node)?
+            self.two_way_merge(local_root_node, remote_root_node)?
         };
 
         // Any remaining deletions on one side should be deleted on the other side.
@@ -203,22 +201,13 @@ impl<'t> Merger<'t> {
         self.delete_remotely.contains(guid)
     }
 
-    fn merge_local_node(&mut self,
-                        merged_guid: &Guid,
-                        local_node: Node<'t>)
-                        -> Result<MergedNode<'t>>
-    {
-        trace!("Item {} only exists locally as {}; taking local state",
-               merged_guid,
-               local_node);
+    fn merge_local_node(&mut self, local_node: Node<'t>) -> Result<MergedNode<'t>> {
+        trace!("Item {} only exists locally", local_node);
 
-        self.merged_guids.insert(merged_guid.clone());
+        self.merged_guids.insert(local_node.guid.clone());
 
-        if &local_node.guid != merged_guid {
-            // We deduped a NEW local item to a remote item.
-            self.merged_guids.insert(local_node.guid.clone());
-        }
-        let mut merged_node = MergedNode::new(merged_guid.clone(), MergeState::local(local_node));
+        let mut merged_node = MergedNode::new(local_node.guid.clone(),
+                                              MergeState::local(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -238,18 +227,13 @@ impl<'t> Merger<'t> {
         Ok(merged_node)
     }
 
-    fn merge_remote_node(&mut self,
-                         merged_guid: &Guid,
-                         remote_node: Node<'t>)
-                         -> Result<MergedNode<'t>>
-    {
-        trace!("Item {} only exists remotely as {}; taking remote state",
-               merged_guid,
-               remote_node);
+    fn merge_remote_node(&mut self, remote_node: Node<'t>) -> Result<MergedNode<'t>> {
+        trace!("Item {} only exists remotely", remote_node);
 
-        self.merged_guids.insert(merged_guid.clone());
+        self.merged_guids.insert(remote_node.guid.clone());
 
-        let mut merged_node = MergedNode::new(merged_guid.clone(), MergeState::remote(remote_node));
+        let mut merged_node = MergedNode::new(remote_node.guid.clone(),
+                                              MergeState::remote(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -270,28 +254,23 @@ impl<'t> Merger<'t> {
 
     /// Merges two nodes that exist locally and remotely.
     fn two_way_merge(&mut self,
-                     merged_guid: &Guid,
                      local_node: Node<'t>,
                      remote_node: Node<'t>)
                      -> Result<MergedNode<'t>>
     {
-        trace!("Item {} exists locally as {} and remotely as {}; merging",
-               merged_guid,
-               local_node,
-               remote_node);
+        trace!("Item exists locally as {} and remotely as {}", local_node, remote_node);
 
-        self.merged_guids.insert(merged_guid.clone());
+        self.merged_guids.insert(remote_node.guid.clone());
 
-        if &local_node.guid != merged_guid {
+        if &local_node.guid != &remote_node.guid {
             // We deduped a NEW local item to a remote item.
             self.merged_guids.insert(local_node.guid.clone());
         }
 
-        let merge_state =
-            self.resolve_two_value_conflict(merged_guid, local_node, remote_node);
-        trace!("Merge state for {} is {}", merged_guid, merge_state);
+        let merge_state = self.resolve_two_value_conflict(local_node, remote_node);
+        trace!("Merge state for {} is {}", remote_node.guid, merge_state);
 
-        let mut merged_node = MergedNode::new(merged_guid.clone(), merge_state);
+        let mut merged_node = MergedNode::new(remote_node.guid.clone(), merge_state);
 
         if !local_node.has_compatible_kind(&remote_node) {
             error!("Merging local {} and remote {} with different kinds",
@@ -353,17 +332,12 @@ impl<'t> Merger<'t> {
     }
 
     /// Determines the merge state for a node that exists locally and remotely.
-    ///
-    /// `merged_guid` is the same as the remote GUID, and usually the same as
-    /// the local GUID. The local GUID may be different if we're deduping a
-    /// local item to a remote item.
     fn resolve_two_value_conflict(&mut self,
-                                  merged_guid: &Guid,
                                   local_node: Node<'t>,
                                   remote_node: Node<'t>)
                                   -> MergeState<'t>
     {
-        if USER_CONTENT_ROOTS.contains(&merged_guid) {
+        if USER_CONTENT_ROOTS.contains(&remote_node.guid) {
             // Don't update root titles or other properties.
             return MergeState::local(local_node);
         }
@@ -454,8 +428,7 @@ impl<'t> Merger<'t> {
                        remote_parent_node,
                        local_parent_node);
 
-                let merged_child_node = self.two_way_merge(&local_child_node.guid,
-                                                           local_child_node,
+                let merged_child_node = self.two_way_merge(local_child_node,
                                                            remote_child_node)?;
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(false);
@@ -495,8 +468,7 @@ impl<'t> Merger<'t> {
                            local_parent_node,
                            latest_local_age);
 
-                    let merged_child_node = self.two_way_merge(&remote_child_node.guid,
-                                                               local_child_node,
+                    let merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(false);
@@ -513,8 +485,7 @@ impl<'t> Merger<'t> {
                     trace!("Local parent unchanged; keeping remote child {} in {}",
                            remote_child_node,
                            remote_parent_node);
-                    let merged_child_node = self.two_way_merge(&remote_child_node.guid,
-                                                               local_child_node,
+                    let merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(false);
@@ -532,11 +503,10 @@ impl<'t> Merger<'t> {
                                                           remote_parent_node,
                                                           remote_child_node)
             {
-                self.two_way_merge(&remote_child_node.guid,
-                                   local_child_node_by_content,
+                self.two_way_merge(local_child_node_by_content,
                                    remote_child_node)
             } else {
-                self.merge_remote_node(&remote_child_node.guid, remote_child_node)
+                self.merge_remote_node(remote_child_node)
             }?;
             merged_node.merged_children.push(merged_child_node);
             return Ok(false);
@@ -603,8 +573,7 @@ impl<'t> Merger<'t> {
                        local_parent_node,
                        remote_parent_node);
 
-                let merged_child_node = self.two_way_merge(&local_child_node.guid,
-                                                           local_child_node,
+                let merged_child_node = self.two_way_merge(local_child_node,
                                                            remote_child_node)?;
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(true);
@@ -640,8 +609,7 @@ impl<'t> Merger<'t> {
                            remote_parent_node,
                            latest_remote_age);
 
-                    let merged_child_node = self.two_way_merge(&local_child_node.guid,
-                                                               local_child_node,
+                    let merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(true);
@@ -651,8 +619,7 @@ impl<'t> Merger<'t> {
                            local_child_node,
                            local_parent_node);
 
-                    let merged_child_node = self.two_way_merge(&local_child_node.guid,
-                                                               local_child_node,
+                    let merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(true);
@@ -678,16 +645,14 @@ impl<'t> Merger<'t> {
             {
                 // The local child has a remote content match, so take the remote GUID
                 // and merge.
-                let merged_child_node = self.two_way_merge(&remote_child_node_by_content.guid,
-                                                           local_child_node,
+                let merged_child_node = self.two_way_merge(local_child_node,
                                                            remote_child_node_by_content)?;
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(false);
             } else {
                 // The local child doesn't exist remotely, but we still need to walk
                 // its children.
-                let merged_child_node =
-                    self.merge_local_node(&local_child_node.guid, local_child_node)?;
+                let merged_child_node = self.merge_local_node(local_child_node)?;
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(true);
             }
@@ -933,11 +898,9 @@ impl<'t> Merger<'t> {
                     let mut merged_orphan_node = if let Some(local_child_node) =
                         self.local_tree.node_for_guid(&remote_child_node.guid)
                     {
-                        self.two_way_merge(&remote_child_node.guid,
-                                           local_child_node,
-                                           remote_child_node)
+                        self.two_way_merge(local_child_node, remote_child_node)
                     } else {
-                        self.merge_remote_node(&remote_child_node.guid, remote_child_node)
+                        self.merge_remote_node(remote_child_node)
                     }?;
 
                     // Flag the moved orphan for reupload.
@@ -977,11 +940,9 @@ impl<'t> Merger<'t> {
                     let mut merged_orphan_node = if let Some(remote_child_node) =
                         self.remote_tree.node_for_guid(&local_child_node.guid)
                     {
-                        self.two_way_merge(&remote_child_node.guid,
-                                           local_child_node,
-                                           remote_child_node)
+                        self.two_way_merge(local_child_node, remote_child_node)
                     } else {
-                        self.merge_local_node(&local_child_node.guid, local_child_node)
+                        self.merge_local_node(local_child_node)
                     }?;
 
                     let merge_state = MergeState::new(merged_orphan_node.merge_state);
