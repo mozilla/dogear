@@ -275,7 +275,7 @@ impl<'t> Merger<'t> {
         if !local_node.has_compatible_kind(&remote_node) {
             error!("Merging local {} and remote {} with different kinds",
                    local_node, remote_node);
-            return Err(ErrorKind::MismatchedKindError(local_node.kind, remote_node.kind).into());
+            return Err(ErrorKind::MismatchedItemKind(local_node.kind, remote_node.kind).into());
         }
 
         if local_node.is_folder() && remote_node.is_folder() {
@@ -2743,7 +2743,7 @@ mod tests {
             Ok(_) => panic!("Should not merge trees with mismatched kinds"),
             Err(err) => {
                 match err.kind() {
-                    ErrorKind::MismatchedKindError { .. } => {},
+                    ErrorKind::MismatchedItemKind { .. } => {},
                     kind => panic!("Got {:?} merging trees with mismatched kinds", kind)
                 };
             }

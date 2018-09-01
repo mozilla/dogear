@@ -47,10 +47,10 @@ pub fn merge<S: Store>(store: &mut S, local_time_millis: i64,
     let merged_root = merger.merge()?;
 
     if !merger.subsumes(&local_tree) {
-        return Err(ErrorKind::UnmergedLocalItemsError.into());
+        return Err(ErrorKind::UnmergedLocalItems.into());
     }
     if !merger.subsumes(&remote_tree) {
-        return Err(ErrorKind::UnmergedRemoteItemsError.into());
+        return Err(ErrorKind::UnmergedRemoteItems.into());
     }
 
     store.apply(&merged_root, merger.deletions())?;

@@ -44,44 +44,44 @@ impl fmt::Display for Error {
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    MismatchedKindError(Kind, Kind),
-    DuplicateItemError(Guid),
-    InvalidParentError(Guid, Guid),
-    MissingParentError(Guid, Guid),
-    StorageError(&'static str, u32),
-    MergeConflictError(&'static str),
-    UnmergedLocalItemsError,
-    UnmergedRemoteItemsError,
+    MismatchedItemKind(Kind, Kind),
+    DuplicateItem(Guid),
+    InvalidParent(Guid, Guid),
+    MissingParent(Guid, Guid),
+    Storage(&'static str, u32),
+    MergeConflict,
+    UnmergedLocalItems,
+    UnmergedRemoteItems,
 }
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ErrorKind::MismatchedKindError(local_kind, remote_kind) => {
+            ErrorKind::MismatchedItemKind(local_kind, remote_kind) => {
                 write!(f, "Can't merge local kind {} and remote kind {}",
                        local_kind, remote_kind)
             },
-            ErrorKind::DuplicateItemError(guid) => {
+            ErrorKind::DuplicateItem(guid) => {
                 write!(f, "Item {} already exists in tree", guid)
             },
-            ErrorKind::InvalidParentError(child_guid, parent_guid) => {
+            ErrorKind::InvalidParent(child_guid, parent_guid) => {
                 write!(f, "Can't insert item {} into non-folder {}",
                        child_guid, parent_guid)
             },
-            ErrorKind::MissingParentError(child_guid, parent_guid) => {
+            ErrorKind::MissingParent(child_guid, parent_guid) => {
                 write!(f, "Can't insert item {} into nonexistent parent {}",
                        child_guid, parent_guid)
             },
-            ErrorKind::StorageError(message, result) => {
+            ErrorKind::Storage(message, result) => {
                 write!(f, "Storage error: {} ({})", message, result)
             },
-            ErrorKind::MergeConflictError(message) => {
-                write!(f, "Merge conflict: {}", message)
+            ErrorKind::MergeConflict => {
+                write!(f, "Local tree changed during merge")
             },
-            ErrorKind::UnmergedLocalItemsError => {
+            ErrorKind::UnmergedLocalItems => {
                 write!(f, "Merged tree doesn't mention all items from local tree")
             },
-            ErrorKind::UnmergedRemoteItemsError => {
+            ErrorKind::UnmergedRemoteItems => {
                 write!(f, "Merged tree doesn't mention all items from remote tree")
             }
         }

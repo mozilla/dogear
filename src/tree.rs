@@ -87,15 +87,15 @@ impl Tree {
 
     pub fn insert(&mut self, parent_guid: &Guid, item: Item) -> Result<()> {
         if self.index_by_guid.contains_key(&item.guid) {
-            return Err(ErrorKind::DuplicateItemError(item.guid.clone()).into());
+            return Err(ErrorKind::DuplicateItem(item.guid.clone()).into());
         }
         let child_index = self.entries.len();
         let (parent_index, level, is_syncable) = match self.index_by_guid.get(&parent_guid) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
                 if !parent.item.is_folder() {
-                    return Err(ErrorKind::InvalidParentError(item.guid.clone(),
-                                                             parent.item.guid.clone()).into());
+                    return Err(ErrorKind::InvalidParent(item.guid.clone(),
+                                                        parent.item.guid.clone()).into());
                 }
                 parent.child_indices.push(child_index);
 
@@ -115,8 +115,8 @@ impl Tree {
 
                 (*parent_index, parent.level + 1, is_syncable)
             },
-            None => return Err(ErrorKind::MissingParentError(item.guid.clone(),
-                                                             parent_guid.clone()).into()),
+            None => return Err(ErrorKind::MissingParent(item.guid.clone(),
+                                                        parent_guid.clone()).into()),
         };
         self.index_by_guid.insert(item.guid.clone(), child_index);
         self.entries.push(Entry { parent_index: Some(parent_index),
