@@ -61,6 +61,21 @@ impl Guid {
     }
 
     #[inline]
+    pub fn from_bytes(b: &[u8]) -> Option<Guid> {
+        let repr = if Guid::is_valid(b) {
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(b);
+            Repr::Fast(bytes)
+        } else {
+            match str::from_utf8(b) {
+                Ok(s) => Repr::Slow(s.into()),
+                Err(_) => return None
+            }
+        };
+        Some(Guid(repr))
+    }
+
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self.0 {
             Repr::Fast(ref bytes) => bytes,
@@ -83,8 +98,9 @@ impl Guid {
 
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
-    pub fn is_valid(s: &str) -> bool {
-        s.len() == 12 && s.as_bytes().iter().all(
+    pub fn is_valid<T: AsRef<[u8]>>(s: T) -> bool {
+        let bytes = s.as_ref();
+        bytes.len() == 12 && bytes.iter().all(
             |&byte| VALID_GUID_BYTES[(byte & 0x7f) as usize] == 1
         )
     }
