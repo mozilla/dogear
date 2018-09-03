@@ -1,6 +1,8 @@
 [package]
 name = "dogear"
+description = "A library for merging bookmark trees."
 version = "0.1.0"
+repository = "https://github.com/linacambridge/dogear"
 authors = ["Lina Cambridge <lina@mozilla.com>"]
 license = "Apache-2.0"
 exclude = [".travis.yml", "rustfmt.toml"]
