@@ -47,9 +47,8 @@ const VALID_GUID_BYTES: [u8; 128] =
      0, 0, 0, 0];
 
 impl Guid {
-    #[inline]
     pub fn new(s: &str) -> Guid {
-        let repr = if Guid::is_valid(s) {
+        let repr = if Guid::is_valid(s.as_bytes()) {
             assert!(s.is_char_boundary(12));
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(s.as_bytes());
@@ -60,8 +59,7 @@ impl Guid {
         Guid(repr)
     }
 
-    #[inline]
-    pub fn from_bytes(b: &[u8]) -> Option<Guid> {
+    pub fn from_utf8(b: &[u8]) -> Option<Guid> {
         let repr = if Guid::is_valid(b) {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(b);
@@ -69,6 +67,25 @@ impl Guid {
         } else {
             match str::from_utf8(b) {
                 Ok(s) => Repr::Slow(s.into()),
+                Err(_) => return None
+            }
+        };
+        Some(Guid(repr))
+    }
+
+    pub fn from_utf16(b: &[u16]) -> Option<Guid> {
+        let repr = if Guid::is_valid(b) {
+            let mut bytes = [0u8; 12];
+            for (index, byte) in b.iter().enumerate() {
+                match byte.into_byte() {
+                    Some(byte) => bytes[index] = byte,
+                    None => return None
+                };
+            }
+            Repr::Fast(bytes)
+        } else {
+            match String::from_utf16(b) {
+                Ok(s) => Repr::Slow(s),
                 Err(_) => return None
             }
         };
@@ -98,10 +115,9 @@ impl Guid {
 
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
-    pub fn is_valid<T: AsRef<[u8]>>(s: T) -> bool {
-        let bytes = s.as_ref();
-        bytes.len() == 12 && bytes.iter().all(
-            |&byte| VALID_GUID_BYTES[(byte & 0x7f) as usize] == 1
+    fn is_valid<T: Copy + IntoByte>(bytes: &[T]) -> bool {
+        bytes.len() == 12 && bytes.iter().all(|b|
+            b.into_byte().map(|byte| VALID_GUID_BYTES[(byte & 0x7f) as usize] == 1).unwrap_or(false)
         )
     }
 }
@@ -154,5 +170,29 @@ impl fmt::Debug for Guid {
 impl fmt::Display for Guid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self.as_str(), f)
+    }
+}
+
+/// `impl IntoByte for T` is almost equivalent to `impl TryFrom<T> for u8`, but
+/// `TryFrom` is Nightly-only.
+trait IntoByte {
+    fn into_byte(self) -> Option<u8>;
+}
+
+impl IntoByte for u8 {
+    #[inline]
+    fn into_byte(self) -> Option<u8> {
+        Some(self)
+    }
+}
+
+impl IntoByte for u16 {
+    #[inline]
+    fn into_byte(self) -> Option<u8> {
+        if self > u8::max_value() as u16 {
+            None
+        } else {
+            Some(self as u8)
+        }
     }
 }
