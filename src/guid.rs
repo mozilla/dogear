@@ -39,12 +39,16 @@ pub const USER_CONTENT_ROOTS: [Guid; 4] = [
     Guid(Repr::Fast(*b"mobile______")),
 ];
 
-const VALID_GUID_BYTES: [u8; 128] =
+const VALID_GUID_BYTES: [u8; 255] =
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
      0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
      0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
-     0, 0, 0, 0];
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0];
 
 impl Guid {
     pub fn new(s: &str) -> Guid {
@@ -117,7 +121,7 @@ impl Guid {
     #[inline]
     fn is_valid<T: Copy + IntoByte>(bytes: &[T]) -> bool {
         bytes.len() == 12 && bytes.iter().all(|b|
-            b.into_byte().map(|byte| VALID_GUID_BYTES[(byte & 0x7f) as usize] == 1).unwrap_or(false)
+            b.into_byte().map(|byte| VALID_GUID_BYTES[byte as usize] == 1).unwrap_or(false)
         )
     }
 }
@@ -193,6 +197,37 @@ impl IntoByte for u16 {
             None
         } else {
             Some(self as u8)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_valid() {
+        let valid_guids = &["bookmarkAAAA",
+                            "menu________",
+                            "__folderBB__",
+                            "queryAAAAAAA"];
+        for guid in valid_guids {
+            assert!(Guid::is_valid(guid.as_bytes()),
+                    "{:?} should validate",
+                    guid);
+        }
+
+        let invalid_guids = &["bookmarkAAA", "folder!", "b@dgu1d!"];
+        for guid in invalid_guids {
+            assert!(!Guid::is_valid(guid.as_bytes()),
+                    "{:?} should not validate",
+                    guid);
+        }
+
+        let invalid_guid_bytes: &[[u8; 12]] =
+            &[[113, 117, 101, 114, 121, 65, 225, 193, 65, 65, 65, 65]];
+        for bytes in invalid_guid_bytes {
+            assert!(!Guid::is_valid(bytes), "{:?} should not validate", bytes);
         }
     }
 }
