@@ -1271,7 +1271,7 @@ mod tests {
         assert!(merger.subsumes(&local_tree));
         assert!(merger.subsumes(&remote_tree));
 
-        let expected_tree = nodes!({
+        let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
             ("unfiled_____", Folder, {
                 ("folderBBBBBB", Folder, {
                     ("bookmarkDDDD", Bookmark),
@@ -1280,11 +1280,11 @@ mod tests {
                 })
             }),
             ("toolbar_____", Folder, {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkEEEE", Bookmark)
                 })
             }),
-            ("menu________", Folder, {
+            ("menu________", Folder[needs_merge = true], {
                 ("bookmarkFFFF", Bookmark)
             })
         }).into_tree().unwrap();
@@ -1397,7 +1397,7 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!({
-            ("menu________", Folder, {
+            ("menu________", Folder[needs_merge = true], {
                 // The server has an older menu, so we should use the local order (C A B)
                 // as the base, then append (I J).
                 ("bookmarkCCCC", Bookmark[age = 5]),
@@ -1406,7 +1406,7 @@ mod tests {
                 ("bookmarkIIII", Bookmark),
                 ("bookmarkJJJJ", Bookmark)
             }),
-            ("toolbar_____", Folder[age = 5], {
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
                 // The server has a newer toolbar, so we should use the remote order (F D E)
                 // as the base, then append (G H).
                 ("bookmarkFFFF", Bookmark),
@@ -1473,10 +1473,10 @@ mod tests {
 
         let expected_tree = nodes!({
             ("menu________", Folder, {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkCCCC", Bookmark)
                 }),
-                ("folderDDDDDD", Folder[age = 5], {
+                ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
                     ("bookmarkEEEE", Bookmark[age = 5]),
                     ("bookmarkBBBB", Bookmark)
                 })
@@ -1537,7 +1537,7 @@ mod tests {
                 ("bookmarkCCCC", Bookmark)
             }),
             ("toolbar_____", Folder, {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     // We can guarantee child order (B E D), since we always walk remote
                     // children first, and the remote folder A record is newer than the
                     // local folder. If the local folder were newer, the order would be
@@ -1618,17 +1618,17 @@ mod tests {
 
         let expected_tree = nodes!({
             ("toolbar_____", Folder, {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     // B was deleted remotely, so F moved to A, the closest
                     // surviving parent.
-                    ("bookmarkFFFF", Bookmark)
+                    ("bookmarkFFFF", Bookmark[needs_merge = true])
                 })
             }),
             ("menu________", Folder, {
                 ("folderCCCCCC", Folder, {
-                    ("folderDDDDDD", Folder, {
+                    ("folderDDDDDD", Folder[needs_merge = true], {
                         // E was deleted locally, so G moved to D.
-                        ("bookmarkGGGG", Bookmark)
+                        ("bookmarkGGGG", Bookmark[needs_merge = true])
                     })
                 })
             })
@@ -1713,14 +1713,14 @@ mod tests {
 
         let expected_tree = nodes!({
             ("toolbar_____", Folder, {
-                ("folderAAAAAA", Folder, {
-                    ("bookmarkFFFF", Bookmark)
+                ("folderAAAAAA", Folder[needs_merge = true], {
+                    ("bookmarkFFFF", Bookmark[needs_merge = true])
                 })
             }),
             ("menu________", Folder, {
                 ("folderCCCCCC", Folder, {
-                    ("folderDDDDDD", Folder, {
-                        ("bookmarkGGGG", Bookmark)
+                    ("folderDDDDDD", Folder[needs_merge = true], {
+                        ("bookmarkGGGG", Bookmark[needs_merge = true])
                     })
                 })
             })
@@ -1790,10 +1790,10 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!({
-            ("menu________", Folder, {
+            ("menu________", Folder[needs_merge = true], {
                 ("bookmarkAAAA", Bookmark),
-                ("bookmarkFFFF", Bookmark),
-                ("bookmarkGGGG", Bookmark)
+                ("bookmarkFFFF", Bookmark[needs_merge = true]),
+                ("bookmarkGGGG", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_deletions = vec![
@@ -1904,15 +1904,15 @@ mod tests {
         assert!(merger.subsumes(&local_tree));
         assert!(merger.subsumes(&remote_tree));
 
-        let expected_tree = nodes!({
-            ("menu________", Folder, {
+        let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
+            ("menu________", Folder[needs_merge = true], {
                 ("bookmarkBBBB", Bookmark),
                 ("bookmarkEEEE", Bookmark)
             }),
             ("unfiled_____", Folder, {
                 ("bookmarkCCCC", Bookmark)
             }),
-            ("mobile______", Folder, {
+            ("mobile______", Folder[needs_merge = true], {
                 ("bookmarkFFFF", Bookmark)
             })
         }).into_tree().unwrap();
@@ -1985,11 +1985,11 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!({
-            ("menu________", Folder, {
-                ("bookmarkEEEE", Bookmark),
-                ("bookmarkFFFF", Bookmark)
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkEEEE", Bookmark[needs_merge = true]),
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
             }),
-            ("toolbar_____", Folder, {
+            ("toolbar_____", Folder[needs_merge = true], {
                 ("bookmarkDDDD", Bookmark[age = 5]),
                 ("bookmarkBBBB", Bookmark[age = 5])
             })
@@ -2062,7 +2062,7 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!({
-            ("menu________", Folder, {
+            ("menu________", Folder[needs_merge = true], {
                 ("bookmarkAAAA", Bookmark),
                 ("bookmarkAAA4", Bookmark),
                 ("bookmarkAAA3", Bookmark),
@@ -2179,7 +2179,7 @@ mod tests {
 
         let expected_tree = nodes!({
             ("menu________", Folder[age = 5], {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkBBBB", Bookmark[age = 10]),
                     ("bookmarkCCC1", Bookmark),
                     ("bookmarkCCCC", Bookmark[age = 5])
@@ -2291,7 +2291,7 @@ mod tests {
 
         let expected_tree = nodes!({
             ("menu________", Folder, {
-                ("folderAAAAA1", Folder, {
+                ("folderAAAAA1", Folder[needs_merge = true], {
                     ("bookmarkBBB1", Bookmark),
                     ("bookmarkCCCC", Bookmark[age = 10])
                 }),
@@ -2340,7 +2340,7 @@ mod tests {
         assert!(merger.subsumes(&local_tree));
         assert!(merger.subsumes(&remote_tree));
 
-        let expected_tree = Tree::default();
+        let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true]).into_tree().unwrap();
         let expected_deletions = vec![
             "folderLEFTPC",
             "folderLEFTPF",
@@ -2424,13 +2424,13 @@ mod tests {
         assert!(merger.subsumes(&local_tree));
         assert!(merger.subsumes(&remote_tree));
 
-        let expected_tree = nodes!({
-            ("unfiled_____", Folder, {
-                ("bookmarkJJJJ", Bookmark),
+        let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("bookmarkJJJJ", Bookmark[needs_merge = true]),
                 ("bookmarkGGGG", Bookmark)
             }),
-            ("menu________", Folder, {
-                ("bookmarkBBBB", Bookmark)
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkBBBB", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_deletions = vec![
@@ -2714,11 +2714,11 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!({
-            ("toolbar_____", Folder[age = 5], {
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
                 ("!@#$%^", Bookmark[age = 5]),
                 ("", Bookmark[age = 5])
             }),
-            ("menu________", Folder, {
+            ("menu________", Folder[needs_merge = true], {
                 ("bookmarkAAAA", Bookmark),
                 ("bookmarkBBBB", Bookmark),
                 ("shortGUID", Bookmark),

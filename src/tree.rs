@@ -380,6 +380,10 @@ impl<'t> MergedNode<'t> {
         fn to_item<'t>(merged_node: &MergedNode<'t>) -> Item {
             let mut item = Item::new(merged_node.guid.clone(), merged_node.node.kind);
             item.age = merged_node.node.age;
+            item.needs_merge = match merged_node.merge_state {
+                MergeState::Local | MergeState::Remote => false,
+                _ => true,
+            };
             item
         }
 
