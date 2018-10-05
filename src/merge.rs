@@ -285,7 +285,7 @@ impl<'t> Merger<'t> {
                 (true, false) => {
                     // The node was changed locally since the last sync, but not
                     // remotely. Keep the local state.
-                    MergedNode::new(remote_node.guid.clone(), remote_node, MergeState::Remote)
+                    MergedNode::new(remote_node.guid.clone(), local_node, MergeState::Local)
                 },
                 (false, true) => {
                     // The node was changed remotely, but not locally. Take the
@@ -1473,7 +1473,7 @@ mod tests {
 
         let expected_tree = nodes!({
             ("menu________", Folder, {
-                ("folderAAAAAA", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder[needs_merge = true, age = 10], {
                     ("bookmarkCCCC", Bookmark)
                 }),
                 ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
@@ -1990,7 +1990,7 @@ mod tests {
                 ("bookmarkFFFF", Bookmark[needs_merge = true])
             }),
             ("toolbar_____", Folder[needs_merge = true], {
-                ("bookmarkDDDD", Bookmark[age = 5]),
+                ("bookmarkDDDD", Bookmark),
                 ("bookmarkBBBB", Bookmark[age = 5])
             })
         }).into_tree().unwrap();
