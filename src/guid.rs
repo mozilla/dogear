@@ -193,7 +193,7 @@ impl IntoByte for u8 {
 impl IntoByte for u16 {
     #[inline]
     fn into_byte(self) -> Option<u8> {
-        if self > u8::max_value() as u16 {
+        if self > u16::from(u8::max_value()) {
             None
         } else {
             Some(self as u8)

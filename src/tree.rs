@@ -362,30 +362,35 @@ impl fmt::Display for Kind {
 #[derive(Debug)]
 pub struct MergedNode<'t> {
     pub guid: Guid,
-    pub merge_state: MergeState<'t>,
+    pub node: Node<'t>,
+    pub merge_state: MergeState,
     pub merged_children: Vec<MergedNode<'t>>,
 }
 
 impl<'t> MergedNode<'t> {
-    pub fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
+    pub fn new(guid: Guid, node: Node<'t>, merge_state: MergeState) -> MergedNode<'t> {
         MergedNode { guid,
+                     node,
                      merge_state,
                      merged_children: Vec::new(), }
     }
 
+    #[cfg(test)]
     pub fn into_tree(self) -> Result<Tree> {
-        fn to_item<'t>(node: &MergedNode<'t>) -> Item {
-            let value_state = node.merge_state.value();
-            let decided_value = value_state.node();
-            let mut item = Item::new(node.guid.clone(), decided_value.kind);
-            item.age = decided_value.age;
+        fn to_item<'t>(merged_node: &MergedNode<'t>) -> Item {
+            let mut item = Item::new(merged_node.guid.clone(), merged_node.node.kind);
+            item.age = merged_node.node.age;
             item
         }
 
-        fn inflate<'t>(tree: &mut Tree, parent_guid: &Guid, node: MergedNode<'t>) -> Result<()> {
-            let guid = node.guid.clone();
-            tree.insert(&parent_guid, to_item(&node))?;
-            for merged_child_node in node.merged_children {
+        fn inflate<'t>(tree: &mut Tree,
+                       parent_guid: &Guid,
+                       merged_node: MergedNode<'t>)
+                       -> Result<()>
+        {
+            let guid = merged_node.guid.clone();
+            tree.insert(&parent_guid, to_item(&merged_node))?;
+            for merged_child_node in merged_node.merged_children {
                 inflate(tree, &guid, merged_child_node)?;
             }
             Ok(())
@@ -404,22 +409,18 @@ impl<'t> MergedNode<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        let value_state = self.merge_state.value();
-        let decided_value = value_state.node();
-        match decided_value.kind {
-            Kind::Folder => {
-                match self.merged_children.len() {
-                    0 => format!("{}📂 {}", prefix, &self),
-                    _ => {
-                        let children_prefix = format!("{}| ", prefix);
-                        let children = self.merged_children
-                                           .iter()
-                                           .map(|n| n.to_ascii_fragment(&children_prefix))
-                                           .collect::<Vec<String>>()
-                                           .join("\n");
-                        format!("{}📂 {}\n{}", prefix, &self, children)
-                    },
-                }
+        match self.node.kind {
+            Kind::Folder => match self.merged_children.len() {
+                0 => format!("{}📂 {}", prefix, &self),
+                _ => {
+                    let children_prefix = format!("{}| ", prefix);
+                    let children = self.merged_children
+                                       .iter()
+                                       .map(|n| n.to_ascii_fragment(&children_prefix))
+                                       .collect::<Vec<String>>()
+                                       .join("\n");
+                    format!("{}📂 {}\n{}", prefix, &self, children)
+                },
             },
             _ => format!("{}🔖 {}", prefix, &self),
         }
@@ -432,92 +433,54 @@ impl<'t> fmt::Display for MergedNode<'t> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ValueState<'t> {
-    Local(Node<'t>),
-    Remote(Node<'t>),
-}
-
-impl<'t> ValueState<'t> {
-    pub fn node(&self) -> &Node<'t> {
-        match self {
-            ValueState::Local(node) => node,
-            ValueState::Remote(node) => node,
-        }
-    }
-}
-
-impl<'t> fmt::Display for ValueState<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match self {
-                        ValueState::Local(_) => "Value: Local",
-                        ValueState::Remote(_) => "Value: Remote",
-                    })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum StructureState {
-    Local,
-    Remote,
-    New,
-}
-
-impl fmt::Display for StructureState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match self {
-                        StructureState::Local => "Structure: Local",
-                        StructureState::Remote => "Structure: Remote",
-                        StructureState::New => "Structure: New",
-                    })
-    }
-}
-
 /// The merge state indicates which node we should prefer, local or remote, when
 /// resolving conflicts.
-#[derive(Clone, Copy, Debug)]
-pub struct MergeState<'t>(ValueState<'t>, StructureState);
-
-impl<'t> MergeState<'t> {
+#[derive(Debug)]
+pub enum MergeState {
     /// A local merge state means no changes: we keep the local value and
     /// structure state. This could mean that the item doesn't exist on the
     /// server yet, or that it has newer local changes that we should
     /// upload.
-    pub fn local(node: Node<'t>) -> MergeState<'t> {
-        MergeState(ValueState::Local(node), StructureState::Local)
-    }
+    Local,
 
     /// A remote merge state means we should update the local value and
     /// structure state. The item might not exist locally yet, or might have
     /// newer remote changes that we should apply.
-    pub fn remote(node: Node<'t>) -> MergeState<'t> {
-        MergeState(ValueState::Remote(node), StructureState::Remote)
-    }
+    Remote,
 
-    /// Takes an existing value state, and a new structure state. We use the new
-    /// merge state to resolve conflicts caused by moving local items out of a
-    /// remotely deleted folder, or remote items out of a locally deleted
-    /// folder.
-    ///
-    /// New merged nodes should be reuploaded to the server.
-    pub fn new(old: MergeState<'t>) -> MergeState<'t> {
-        MergeState(old.0, StructureState::New)
-    }
+    /// A local merge state with new structure means we should prefer the local
+    /// value state, and upload the new structure state to the server. We use
+    /// new structure states to resolve conflicts caused by moving local items
+    /// out of a remotely deleted folder, or remote items out of a locally
+    /// deleted folder.
+    LocalWithNewStructure,
 
-    #[inline]
-    pub fn value(&self) -> ValueState {
-        self.0
-    }
+    /// A remote merge state with new structure means we should prefer the
+    /// remote value and reupload the new structure.
+    RemoteWithNewStructure,
+}
 
-    #[inline]
-    pub fn structure(&self) -> StructureState {
-        self.1
+impl MergeState {
+    pub fn with_new_structure(&self) -> MergeState {
+        match self {
+            MergeState::Local | MergeState::LocalWithNewStructure => {
+                MergeState::LocalWithNewStructure
+            },
+            MergeState::Remote | MergeState::RemoteWithNewStructure => {
+                MergeState::RemoteWithNewStructure
+            },
+        }
     }
 }
 
-impl<'t> fmt::Display for MergeState<'t> {
+impl fmt::Display for MergeState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}; {}", self.0, self.1)
+        f.write_str(match self {
+            MergeState::Local => "(Local, Local)",
+            MergeState::Remote => "(Remote, Remote)",
+            MergeState::LocalWithNewStructure => "(Local, New)",
+            MergeState::RemoteWithNewStructure => "(Remote, New)",
+        })
     }
 }
 
