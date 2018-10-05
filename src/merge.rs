@@ -492,10 +492,11 @@ impl<'t> Merger<'t> {
             return Ok(());
         }
 
-        // The local child doesn't exist remotely, so flag the merged parent for
-        // upload, and walk its descendants.
-        let merged_child_node = self.merge_local_node(local_child_node)?;
+        // The local child doesn't exist remotely, so flag the merged parent and
+        // new child for upload, and walk its descendants.
+        let mut merged_child_node = self.merge_local_node(local_child_node)?;
         merged_node.merge_state = merged_node.merge_state.with_new_structure();
+        merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
         merged_node.merged_children.push(merged_child_node);
         Ok(())
     }
@@ -520,9 +521,18 @@ impl<'t> Merger<'t> {
                    local_parent_node,
                    remote_parent_node);
 
-            // Merge and flag the new parent for reupload.
-            let merged_child_node = self.two_way_merge(local_child_node, remote_child_node)?;
+            // Merge and flag the new parent *and the locally moved child* for
+            // reupload. The parent references the child in its `children`; the
+            // child points back to the parent in its `parentid`.
+            //
+            // Reuploading the child isn't necessary for newer Desktops, which
+            // ignore the child's `parentid` and use the parent's `children`.
+            //
+            // However, older Desktop and Android use the child's `parentid` as
+            // canonical, while iOS is stricter and requires both to match.
+            let mut merged_child_node = self.two_way_merge(local_child_node, remote_child_node)?;
             merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
             merged_node.merged_children.push(merged_child_node);
             return Ok(());
         }
@@ -561,10 +571,13 @@ impl<'t> Merger<'t> {
                            remote_parent_node,
                            latest_remote_age);
 
-                    // Merge and flag the new parent for reupload.
-                    let merged_child_node = self.two_way_merge(local_child_node,
-                                                               remote_child_node)?;
+                    // Merge and flag both the new parent and child for
+                    // reupload. See above for why.
+                    let mut merged_child_node = self.two_way_merge(local_child_node,
+                                                                   remote_child_node)?;
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_structure();
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(());
                 }
@@ -607,10 +620,13 @@ impl<'t> Merger<'t> {
                            local_child_node,
                            local_parent_node);
 
-                    // Merge and flag the new parent for reupload.
-                    let merged_child_node = self.two_way_merge(local_child_node,
-                                                               remote_child_node)?;
+                    // Merge and flag both the new parent and child for
+                    // reupload.
+                    let mut merged_child_node = self.two_way_merge(local_child_node,
+                                                                   remote_child_node)?;
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_structure();
                     merged_node.merged_children.push(merged_child_node);
                     return Ok(());
                 }
@@ -1285,7 +1301,7 @@ mod tests {
                 })
             }),
             ("menu________", Folder[needs_merge = true], {
-                ("bookmarkFFFF", Bookmark)
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_telem = StructureCounts::default();
@@ -1412,8 +1428,8 @@ mod tests {
                 ("bookmarkFFFF", Bookmark),
                 ("bookmarkDDDD", Bookmark),
                 ("bookmarkEEEE", Bookmark),
-                ("bookmarkGGGG", Bookmark),
-                ("bookmarkHHHH", Bookmark)
+                ("bookmarkGGGG", Bookmark[needs_merge = true]),
+                ("bookmarkHHHH", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_telem = StructureCounts::default();
@@ -1478,7 +1494,7 @@ mod tests {
                 }),
                 ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
                     ("bookmarkEEEE", Bookmark[age = 5]),
-                    ("bookmarkBBBB", Bookmark)
+                    ("bookmarkBBBB", Bookmark[needs_merge = true])
                 })
             })
         }).into_tree().unwrap();
@@ -1544,7 +1560,7 @@ mod tests {
                     // (D B E).
                     ("bookmarkBBBB", Bookmark),
                     ("bookmarkEEEE", Bookmark),
-                    ("bookmarkDDDD", Bookmark)
+                    ("bookmarkDDDD", Bookmark[needs_merge = true])
                 })
             })
         }).into_tree().unwrap();
@@ -1907,13 +1923,13 @@ mod tests {
         let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
             ("menu________", Folder[needs_merge = true], {
                 ("bookmarkBBBB", Bookmark),
-                ("bookmarkEEEE", Bookmark)
+                ("bookmarkEEEE", Bookmark[needs_merge = true])
             }),
             ("unfiled_____", Folder, {
                 ("bookmarkCCCC", Bookmark)
             }),
             ("mobile______", Folder[needs_merge = true], {
-                ("bookmarkFFFF", Bookmark)
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_deletions = vec![
@@ -1990,7 +2006,7 @@ mod tests {
                 ("bookmarkFFFF", Bookmark[needs_merge = true])
             }),
             ("toolbar_____", Folder[needs_merge = true], {
-                ("bookmarkDDDD", Bookmark),
+                ("bookmarkDDDD", Bookmark[needs_merge = true]),
                 ("bookmarkBBBB", Bookmark[age = 5])
             })
         }).into_tree().unwrap();
@@ -2065,7 +2081,7 @@ mod tests {
             ("menu________", Folder[needs_merge = true], {
                 ("bookmarkAAAA", Bookmark),
                 ("bookmarkAAA4", Bookmark),
-                ("bookmarkAAA3", Bookmark),
+                ("bookmarkAAA3", Bookmark[needs_merge = true]),
                 ("bookmarkAAA5", Bookmark)
             })
         }).into_tree().unwrap();
@@ -2182,7 +2198,7 @@ mod tests {
                 ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkBBBB", Bookmark[age = 10]),
                     ("bookmarkCCC1", Bookmark),
-                    ("bookmarkCCCC", Bookmark[age = 5])
+                    ("bookmarkCCCC", Bookmark[needs_merge = true, age = 5])
                 }),
                 ("folderDDDDD1", Folder, {
                     ("bookmarkEEE1", Bookmark),
@@ -2293,7 +2309,7 @@ mod tests {
             ("menu________", Folder, {
                 ("folderAAAAA1", Folder[needs_merge = true], {
                     ("bookmarkBBB1", Bookmark),
-                    ("bookmarkCCCC", Bookmark[age = 10])
+                    ("bookmarkCCCC", Bookmark[needs_merge = true, age = 10])
                 }),
                 ("folderDDDDD1", Folder, {
                     ("bookmarkEEE1", Bookmark)
@@ -2721,8 +2737,8 @@ mod tests {
             ("menu________", Folder[needs_merge = true], {
                 ("bookmarkAAAA", Bookmark),
                 ("bookmarkBBBB", Bookmark),
-                ("shortGUID", Bookmark),
-                ("loooooongGUID", Bookmark)
+                ("shortGUID", Bookmark[needs_merge = true]),
+                ("loooooongGUID", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_telem = StructureCounts::default();
