@@ -362,26 +362,54 @@ impl fmt::Display for Kind {
 #[derive(Debug)]
 pub struct MergedNode<'t> {
     pub guid: Guid,
-    pub node: Node<'t>,
-    pub merge_state: MergeState,
+    pub merge_state: MergeState<'t>,
     pub merged_children: Vec<MergedNode<'t>>,
 }
 
 impl<'t> MergedNode<'t> {
-    pub fn new(guid: Guid, node: Node<'t>, merge_state: MergeState) -> MergedNode<'t> {
+    pub fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
         MergedNode { guid,
-                     node,
                      merge_state,
                      merged_children: Vec::new(), }
+    }
+
+    /// Indicates whether to prefer the remote side when applying the merged tree.
+    pub fn use_remote(&self) -> bool {
+        match self.merge_state {
+            MergeState::Local { .. } | MergeState::LocalWithNewStructure { .. } => false,
+            MergeState::Remote { local_node, remote_node } => {
+                // If the item exists on both sides, check if the remote node
+                // changed. Otherwise, unconditionally take the remote state.
+                local_node.map(|_| remote_node.needs_merge).unwrap_or(true)
+            },
+            MergeState::RemoteWithNewStructure { local_node, remote_node } => {
+                local_node.map(|_| remote_node.needs_merge).unwrap_or(true)
+            },
+        }
+    }
+
+    /// Indicates whether the merged item should be (re)uploaded to the server.
+    pub fn needs_upload(&self) -> bool {
+        match self.merge_state {
+            MergeState::Local { local_node, remote_node } => {
+                // If the item exists on both sides, check if the local node
+                // changed. Otherwise, unconditionally upload the local state.
+                remote_node.map(|_| local_node.needs_merge).unwrap_or(true)
+            }
+            MergeState::Remote { .. } => false,
+            MergeState::LocalWithNewStructure { .. }
+            | MergeState::RemoteWithNewStructure { .. } => true,
+        }
     }
 
     #[cfg(test)]
     pub fn into_tree(self) -> Result<Tree> {
         fn to_item<'t>(merged_node: &MergedNode<'t>) -> Item {
-            let mut item = Item::new(merged_node.guid.clone(), merged_node.node.kind);
-            item.age = merged_node.node.age;
+            let node = merged_node.node();
+            let mut item = Item::new(merged_node.guid.clone(), node.kind);
+            item.age = node.age;
             item.needs_merge = match merged_node.merge_state {
-                MergeState::Local | MergeState::Remote => false,
+                MergeState::Local { .. } | MergeState::Remote { .. } => false,
                 _ => true,
             };
             item
@@ -413,7 +441,7 @@ impl<'t> MergedNode<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        match self.node.kind {
+        match self.node().kind {
             Kind::Folder => match self.merged_children.len() {
                 0 => format!("{}📂 {}", prefix, &self),
                 _ => {
@@ -429,6 +457,15 @@ impl<'t> MergedNode<'t> {
             _ => format!("{}🔖 {}", prefix, &self),
         }
     }
+
+    fn node(&self) -> Node {
+        match self.merge_state {
+            MergeState::Local { local_node, .. } => local_node,
+            MergeState::Remote { remote_node, .. } => remote_node,
+            MergeState::LocalWithNewStructure { local_node, .. } => local_node,
+            MergeState::RemoteWithNewStructure { remote_node, .. } => remote_node,
+        }
+    }
 }
 
 impl<'t> fmt::Display for MergedNode<'t> {
@@ -439,51 +476,56 @@ impl<'t> fmt::Display for MergedNode<'t> {
 
 /// The merge state indicates which node we should prefer, local or remote, when
 /// resolving conflicts.
-#[derive(Debug)]
-pub enum MergeState {
+#[derive(Clone, Copy, Debug)]
+pub enum MergeState<'t> {
     /// A local merge state means no changes: we keep the local value and
     /// structure state. This could mean that the item doesn't exist on the
     /// server yet, or that it has newer local changes that we should
     /// upload.
-    Local,
+    Local { local_node: Node<'t>, remote_node: Option<Node<'t>> },
 
     /// A remote merge state means we should update the local value and
     /// structure state. The item might not exist locally yet, or might have
     /// newer remote changes that we should apply.
-    Remote,
+    Remote { local_node: Option<Node<'t>>, remote_node: Node<'t> },
 
     /// A local merge state with new structure means we should prefer the local
     /// value state, and upload the new structure state to the server. We use
     /// new structure states to resolve conflicts caused by moving local items
     /// out of a remotely deleted folder, or remote items out of a locally
     /// deleted folder.
-    LocalWithNewStructure,
+    LocalWithNewStructure { local_node: Node<'t>, remote_node: Option<Node<'t>> },
 
     /// A remote merge state with new structure means we should prefer the
     /// remote value and reupload the new structure.
-    RemoteWithNewStructure,
+    RemoteWithNewStructure { local_node: Option<Node<'t>>, remote_node: Node<'t> },
 }
 
-impl MergeState {
-    pub fn with_new_structure(&self) -> MergeState {
-        match self {
-            MergeState::Local | MergeState::LocalWithNewStructure => {
-                MergeState::LocalWithNewStructure
-            },
-            MergeState::Remote | MergeState::RemoteWithNewStructure => {
-                MergeState::RemoteWithNewStructure
-            },
+impl<'t> MergeState<'t> {
+    pub fn local(local_node: Node<'t>) -> MergeState {
+        MergeState::Local { local_node, remote_node: None }
+    }
+
+    pub fn remote(remote_node: Node<'t>) -> MergeState {
+        MergeState::Remote { local_node: None, remote_node }
+    }
+
+    pub fn with_new_structure(&self) -> MergeState<'t> {
+        match *self {
+            MergeState::Local { local_node, remote_node } => MergeState::LocalWithNewStructure { local_node, remote_node },
+            MergeState::Remote { local_node, remote_node } => MergeState::RemoteWithNewStructure { local_node, remote_node },
+            state => state,
         }
     }
 }
 
-impl fmt::Display for MergeState {
+impl<'t> fmt::Display for MergeState<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
-            MergeState::Local => "(Local, Local)",
-            MergeState::Remote => "(Remote, Remote)",
-            MergeState::LocalWithNewStructure => "(Local, New)",
-            MergeState::RemoteWithNewStructure => "(Remote, New)",
+            MergeState::Local { .. } => "(Local, Local)",
+            MergeState::Remote { .. } => "(Remote, Remote)",
+            MergeState::LocalWithNewStructure { .. } => "(Local, New)",
+            MergeState::RemoteWithNewStructure { .. } => "(Remote, New)",
         })
     }
 }

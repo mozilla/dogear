@@ -206,8 +206,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(local_node.guid.clone());
 
         let mut merged_node = MergedNode::new(local_node.guid.clone(),
-                                              local_node,
-                                              MergeState::Local);
+                                              MergeState::local(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -229,8 +228,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(remote_node.guid.clone());
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(),
-                                              remote_node,
-                                              MergeState::Remote);
+                                              MergeState::remote(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -270,30 +268,36 @@ impl<'t> Merger<'t> {
 
         let mut merged_node = if USER_CONTENT_ROOTS.contains(&remote_node.guid) {
             // Don't update root titles or other properties.
-            MergedNode::new(remote_node.guid.clone(), local_node, MergeState::Local)
+            MergedNode::new(remote_node.guid.clone(),
+                            MergeState::Local { local_node, remote_node: Some(remote_node) })
         } else {
             match (local_node.needs_merge, remote_node.needs_merge) {
                 (true, true) => {
                     // The node was changed locally and remotely since the last
                     // sync. Use the timestamp to decide which is newer.
                     if local_node.newer_than(&remote_node) {
-                        MergedNode::new(remote_node.guid.clone(), local_node, MergeState::Local)
+                        MergedNode::new(remote_node.guid.clone(),
+                                        MergeState::Local { local_node, remote_node: Some(remote_node) })
                     } else {
-                        MergedNode::new(remote_node.guid.clone(), remote_node, MergeState::Remote)
+                        MergedNode::new(remote_node.guid.clone(),
+                                        MergeState::Remote { local_node: Some(local_node), remote_node })
                     }
                 },
                 (true, false) => {
                     // The node was changed locally since the last sync, but not
                     // remotely. Keep the local state.
-                    MergedNode::new(remote_node.guid.clone(), local_node, MergeState::Local)
+                    MergedNode::new(remote_node.guid.clone(),
+                                    MergeState::Local { local_node, remote_node: Some(remote_node) })
                 },
                 (false, true) => {
                     // The node was changed remotely, but not locally. Take the
                     // remote state.
-                    MergedNode::new(remote_node.guid.clone(), remote_node, MergeState::Remote)
+                    MergedNode::new(remote_node.guid.clone(),
+                                    MergeState::Remote { local_node: Some(local_node), remote_node })
                 },
                 (false, false) => {
-                    MergedNode::new(remote_node.guid.clone(), remote_node, MergeState::Remote)
+                    MergedNode::new(remote_node.guid.clone(),
+                                    MergeState::Remote { local_node: Some(local_node), remote_node })
                 },
             }
         };
