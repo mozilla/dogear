@@ -32,9 +32,6 @@ before_install:
 install:
   - ./.travis/install.sh
 
-before_script:
-  - rustup component add rustfmt-preview
-
 script:
   - cargo build
   - cargo test
