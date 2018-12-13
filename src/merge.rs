@@ -273,8 +273,8 @@ impl<'t> Merger<'t> {
         } else {
             match (local_node.needs_merge, remote_node.needs_merge) {
                 (true, true) => {
-                    // The node was changed locally and remotely since the last
-                    // sync. Use the timestamp to decide which is newer.
+                    // The item changed locally and remotely. Use the timestamp
+                    // to decide which is newer.
                     if local_node.newer_than(&remote_node) {
                         MergedNode::new(remote_node.guid.clone(),
                                         MergeState::Local { local_node, remote_node: Some(remote_node) })
@@ -284,20 +284,21 @@ impl<'t> Merger<'t> {
                     }
                 },
                 (true, false) => {
-                    // The node was changed locally since the last sync, but not
-                    // remotely. Keep the local state.
+                    // The item changed locally, but not remotely. Keep the
+                    // local state.
                     MergedNode::new(remote_node.guid.clone(),
                                     MergeState::Local { local_node, remote_node: Some(remote_node) })
                 },
                 (false, true) => {
-                    // The node was changed remotely, but not locally. Take the
+                    // The item changed remotely, but not locally. Take the
                     // remote state.
                     MergedNode::new(remote_node.guid.clone(),
                                     MergeState::Remote { local_node: Some(local_node), remote_node })
                 },
                 (false, false) => {
+                  // The item is unchanged on both sides. Keep the local state.
                     MergedNode::new(remote_node.guid.clone(),
-                                    MergeState::Remote { local_node: Some(local_node), remote_node })
+                                    MergeState::Local { local_node, remote_node: Some(remote_node) })
                 },
             }
         };
@@ -1420,9 +1421,9 @@ mod tests {
             ("menu________", Folder[needs_merge = true], {
                 // The server has an older menu, so we should use the local order (C A B)
                 // as the base, then append (I J).
-                ("bookmarkCCCC", Bookmark[age = 5]),
-                ("bookmarkAAAA", Bookmark[age = 5]),
-                ("bookmarkBBBB", Bookmark[age = 5]),
+                ("bookmarkCCCC", Bookmark),
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkBBBB", Bookmark),
                 ("bookmarkIIII", Bookmark),
                 ("bookmarkJJJJ", Bookmark)
             }),
