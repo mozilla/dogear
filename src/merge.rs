@@ -213,7 +213,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(local_node.guid.clone());
 
         let mut merged_node = MergedNode::new(local_node.guid.clone(),
-                                              MergeState::local(local_node));
+                                              MergeState::Local(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -235,7 +235,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(remote_node.guid.clone());
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(),
-                                              MergeState::remote(remote_node));
+                                              MergeState::Remote(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -277,10 +277,10 @@ impl<'t> Merger<'t> {
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
             ConflictResolution::Local => {
-                MergeState::Local { local_node, remote_node: Some(remote_node) }
+                MergeState::Local(local_node)
             },
             ConflictResolution::Remote => {
-                MergeState::Remote { local_node: Some(local_node), remote_node }
+                MergeState::Remote(remote_node)
             },
             ConflictResolution::Unchanged => {
                 MergeState::Unchanged { local_node, remote_node }
@@ -1406,9 +1406,9 @@ mod tests {
             ("menu________", Folder[needs_merge = true], {
                 // The server has an older menu, so we should use the local order (C A B)
                 // as the base, then append (I J).
-                ("bookmarkCCCC", Bookmark[age = 5]),
-                ("bookmarkAAAA", Bookmark[age = 5]),
-                ("bookmarkBBBB", Bookmark[age = 5]),
+                ("bookmarkCCCC", Bookmark),
+                ("bookmarkAAAA", Bookmark),
+                ("bookmarkBBBB", Bookmark),
                 ("bookmarkIIII", Bookmark),
                 ("bookmarkJJJJ", Bookmark)
             }),
