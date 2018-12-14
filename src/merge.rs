@@ -16,7 +16,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
           mem};
 
 use error::{ErrorKind, Result};
-use guid::{Guid, USER_CONTENT_ROOTS};
+use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 use tree::{Content, MergeState, MergedNode, Node, Tree};
 
 /// Structure change types, used to indicate if a node on one side is moved
@@ -55,6 +55,12 @@ pub struct Deletion {
     pub guid: Guid,
     pub local_level: i64,
     pub should_upload_tombstone: bool,
+}
+
+/// Indicates which side to take in case of a merge conflict.
+enum ConflictResolution {
+    Local,
+    Remote,
 }
 
 /// A two-way merger that produces a complete merged tree from a complete local
@@ -266,76 +272,49 @@ impl<'t> Merger<'t> {
             self.merged_guids.insert(local_node.guid.clone());
         }
 
-        let mut merged_node = if USER_CONTENT_ROOTS.contains(&remote_node.guid) {
-            // Don't update root titles or other properties.
-            MergedNode::new(remote_node.guid.clone(),
-                            MergeState::Local { local_node, remote_node: Some(remote_node) })
-        } else {
-            match (local_node.needs_merge, remote_node.needs_merge) {
-                (true, true) => {
-                    // The item changed locally and remotely. Use the timestamp
-                    // to decide which is newer.
-                    if local_node.newer_than(&remote_node) {
-                        MergedNode::new(remote_node.guid.clone(),
-                                        MergeState::Local { local_node, remote_node: Some(remote_node) })
-                    } else {
-                        MergedNode::new(remote_node.guid.clone(),
-                                        MergeState::Remote { local_node: Some(local_node), remote_node })
-                    }
-                },
-                (true, false) => {
-                    // The item changed locally, but not remotely. Keep the
-                    // local state.
-                    MergedNode::new(remote_node.guid.clone(),
-                                    MergeState::Local { local_node, remote_node: Some(remote_node) })
-                },
-                (false, true) => {
-                    // The item changed remotely, but not locally. Take the
-                    // remote state.
-                    MergedNode::new(remote_node.guid.clone(),
-                                    MergeState::Remote { local_node: Some(local_node), remote_node })
-                },
-                (false, false) => {
-                  // The item is unchanged on both sides. Keep the local state.
-                    MergedNode::new(remote_node.guid.clone(),
-                                    MergeState::Local { local_node, remote_node: Some(remote_node) })
-                },
-            }
-        };
+        let (item, children) = self.resolve_value_conflict(local_node, remote_node);
 
-        if local_node.newer_than(&remote_node) {
-            // The folder exists locally and remotely, and the local node is newer.
-            // Walk and merge local children first, followed by remaining unmerged
-            // remote children.
-            for local_child_node in local_node.children() {
-                self.merge_local_child_into_merged_node(&mut merged_node,
-                                                        local_node,
-                                                        Some(remote_node),
-                                                        local_child_node)?;
-            }
-            for remote_child_node in remote_node.children() {
-                self.merge_remote_child_into_merged_node(&mut merged_node,
-                                                         Some(local_node),
-                                                         remote_node,
-                                                         remote_child_node)?;
-            }
-            return Ok(merged_node);
+        let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
+            ConflictResolution::Local => {
+                MergeState::Local { local_node, remote_node: Some(remote_node) }
+            },
+            ConflictResolution::Remote => {
+                MergeState::Remote { local_node: Some(local_node), remote_node }
+            },
+        });
+
+        match children {
+            ConflictResolution::Local => {
+                for local_child_node in local_node.children() {
+                    self.merge_local_child_into_merged_node(&mut merged_node,
+                                                            local_node,
+                                                            Some(remote_node),
+                                                            local_child_node)?;
+                }
+                for remote_child_node in remote_node.children() {
+                    self.merge_remote_child_into_merged_node(&mut merged_node,
+                                                             Some(local_node),
+                                                             remote_node,
+                                                             remote_child_node)?;
+                }
+            },
+
+            ConflictResolution::Remote => {
+                for remote_child_node in remote_node.children() {
+                    self.merge_remote_child_into_merged_node(&mut merged_node,
+                                                             Some(local_node),
+                                                             remote_node,
+                                                             remote_child_node)?;
+                }
+                for local_child_node in local_node.children() {
+                    self.merge_local_child_into_merged_node(&mut merged_node,
+                                                            local_node,
+                                                            Some(remote_node),
+                                                            local_child_node)?;
+                }
+            },
         }
 
-        // The folder exists locally and remotely, and the remote node is newer.
-        // Merge remote children first, then remaining local children.
-        for remote_child_node in remote_node.children() {
-            self.merge_remote_child_into_merged_node(&mut merged_node,
-                                                     Some(local_node),
-                                                     remote_node,
-                                                     remote_child_node)?;
-        }
-        for local_child_node in local_node.children() {
-            self.merge_local_child_into_merged_node(&mut merged_node,
-                                                    local_node,
-                                                    Some(remote_node),
-                                                    local_child_node)?;
-        }
         Ok(merged_node)
     }
 
@@ -398,11 +377,62 @@ impl<'t> Merger<'t> {
                 local_child_node.parent()
                                 .expect("Can't merge existing remote child without local parent");
 
-            return self.merge_remote_child_node_with_local_child_node(merged_node,
-                                                                      local_parent_node,
-                                                                      local_child_node,
-                                                                      remote_parent_node,
-                                                                      remote_child_node);
+            trace!("Remote child {} exists locally in {} and remotely in {}",
+                   remote_child_node,
+                   local_parent_node,
+                   remote_parent_node);
+
+            if self.remote_tree.is_deleted(&local_parent_node.guid) {
+                trace!("Unconditionally taking remote move for {} to {} because local parent {} is \
+                        deleted remotely",
+                       remote_child_node,
+                       remote_parent_node,
+                       local_parent_node);
+
+                let merged_child_node = self.two_way_merge(local_child_node, remote_child_node)?;
+                merged_node.merged_children.push(merged_child_node);
+
+                return Ok(());
+            }
+
+            match self.resolve_structure_conflict(local_parent_node,
+                                                  local_child_node,
+                                                  remote_parent_node,
+                                                  remote_child_node)
+            {
+                ConflictResolution::Local => {
+                    // The local move is newer, so we ignore the remote move.
+                    // We'll merge the remote child later, when we walk its new
+                    // local parent.
+                    trace!("Remote child {} moved locally to {} and remotely to {}; \
+                            keeping child in newer local parent and position",
+                           remote_child_node,
+                           local_parent_node,
+                           remote_parent_node);
+
+                    // Flag the old parent for reupload, since we're moving
+                    // the remote child. Note that, since we only flag the
+                    // remote parent here, we don't need to handle
+                    // reparenting and repositioning separately.
+                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                },
+
+                ConflictResolution::Remote => {
+                    // The remote move is newer, so we merge the remote
+                    // child now and ignore the local move.
+                    trace!("Remote child {} moved locally to {} and remotely to {}; \
+                            keeping child in newer remote parent and position",
+                           remote_child_node,
+                           local_parent_node,
+                           remote_parent_node);
+
+                    let merged_child_node = self.two_way_merge(local_child_node,
+                                                               remote_child_node)?;
+                    merged_node.merged_children.push(merged_child_node);
+                },
+            }
+
+            return Ok(());
         }
 
         // Remote child is not a root, and doesn't exist locally. Try to find a
@@ -470,11 +500,97 @@ impl<'t> Merger<'t> {
             let remote_parent_node =
                 remote_child_node.parent()
                                  .expect("Can't merge existing local child without remote parent");
-            return self.merge_local_child_node_with_remote_child_node(merged_node,
-                                                                      local_parent_node,
-                                                                      local_child_node,
-                                                                      remote_parent_node,
-                                                                      remote_child_node);
+
+            trace!("Local child {} exists locally in {} and remotely in {}",
+                   local_child_node,
+                   local_parent_node,
+                   remote_parent_node);
+
+            if self.local_tree.is_deleted(&remote_parent_node.guid) {
+                trace!("Unconditionally taking local move for {} to {} because remote parent {} is \
+                        deleted locally",
+                       local_child_node,
+                       local_parent_node,
+                       remote_parent_node);
+
+                // Merge and flag the new parent *and the locally moved child* for
+                // reupload. The parent references the child in its `children`; the
+                // child points back to the parent in its `parentid`.
+                //
+                // Reuploading the child isn't necessary for newer Desktops, which
+                // ignore the child's `parentid` and use the parent's `children`.
+                //
+                // However, older Desktop and Android use the child's `parentid` as
+                // canonical, while iOS is stricter and requires both to match.
+                let mut merged_child_node = self.two_way_merge(local_child_node,
+                                                               remote_child_node)?;
+                merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                merged_node.merged_children.push(merged_child_node);
+                return Ok(());
+            }
+
+            match self.resolve_structure_conflict(local_parent_node,
+                                                  local_child_node,
+                                                  remote_parent_node,
+                                                  remote_child_node)
+            {
+                ConflictResolution::Local => {
+                    // The local move is newer, so we merge the local child now
+                    // and ignore the remote move.
+                    if local_parent_node.guid != remote_parent_node.guid {
+                        // The child moved to a different folder.
+                        trace!("Local child {} reparented locally to {} and remotely to {}; \
+                                keeping child in newer local parent",
+                               local_child_node,
+                               local_parent_node,
+                               remote_parent_node);
+
+                        // Merge and flag both the new parent and child for
+                        // reupload. See above for why.
+                        let mut merged_child_node = self.two_way_merge(local_child_node,
+                                                                       remote_child_node)?;
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_structure();
+                        merged_node.merged_children.push(merged_child_node);
+                    } else {
+                        trace!("Local child {} repositioned locally in {} and remotely in {}; \
+                                keeping child in newer local position",
+                               local_child_node,
+                               local_parent_node,
+                               remote_parent_node);
+
+                        // For position changes in the same folder, we only need to
+                        // merge and flag the parent for reupload.
+                        let merged_child_node = self.two_way_merge(local_child_node,
+                                                                   remote_child_node)?;
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        merged_node.merged_children.push(merged_child_node);
+                    }
+                },
+
+                ConflictResolution::Remote => {
+                    // The remote move is newer, so we ignore the local
+                    // move. We'll merge the local child later, when we
+                    // walk its new remote parent.
+                    if local_parent_node.guid != remote_parent_node.guid {
+                        trace!("Local child {} reparented locally to {} and remotely to {}; \
+                                keeping child in newer remote parent",
+                               local_child_node,
+                               local_parent_node,
+                               remote_parent_node);
+                    } else {
+                        trace!("Local child {} repositioned locally in {} and remotely in {}; \
+                                keeping child in newer remote position",
+                               local_child_node,
+                               local_parent_node,
+                               remote_parent_node);
+                    }
+                },
+            }
+
+            return Ok(());
         }
 
         // Local child is not a root, and doesn't exist remotely. Try to find a
@@ -506,40 +622,69 @@ impl<'t> Merger<'t> {
         Ok(())
     }
 
-    fn merge_local_child_node_with_remote_child_node(&mut self,
-                                                     merged_node: &mut MergedNode<'t>,
-                                                     local_parent_node: Node<'t>,
-                                                     local_child_node: Node<'t>,
-                                                     remote_parent_node: Node<'t>,
-                                                     remote_child_node: Node<'t>)
-                                                     -> Result<()>
+    /// Determines which side to prefer, and which children to merge first,
+    /// for an item that exists on both sides.
+    fn resolve_value_conflict(&self,
+                              local_node: Node<'t>,
+                              remote_node: Node<'t>)
+                              -> (ConflictResolution, ConflictResolution)
     {
-        trace!("Local child {} exists locally in {} and remotely in {}",
-               local_child_node,
-               local_parent_node,
-               remote_parent_node);
+        if remote_node.guid == ROOT_GUID {
+            // Don't reorder local roots.
+            return (ConflictResolution::Local, ConflictResolution::Local);
+        }
 
-        if self.local_tree.is_deleted(&remote_parent_node.guid) {
-            trace!("Unconditionally taking local move for {} to {} because remote parent {} is \
-                    deleted locally",
-                   local_child_node,
-                   local_parent_node,
-                   remote_parent_node);
+        match (local_node.needs_merge, remote_node.needs_merge) {
+            (true, true) => {
+                // The item changed locally and remotely.
+                if local_node.newer_than(&remote_node) {
+                    // The local change is newer, so merge local children first,
+                    // followed by remaining unmerged remote children.
+                    (ConflictResolution::Local, ConflictResolution::Local)
+                } else {
+                    // The remote change is newer, so walk and merge remote
+                    // children first, then remaining local children.
+                    if USER_CONTENT_ROOTS.contains(&remote_node.guid) {
+                        // Don't update root titles or other properties, but
+                        // use their newer remote structure.
+                        (ConflictResolution::Local, ConflictResolution::Remote)
+                    } else {
+                        (ConflictResolution::Remote, ConflictResolution::Remote)
+                    }
+                }
+            },
 
-            // Merge and flag the new parent *and the locally moved child* for
-            // reupload. The parent references the child in its `children`; the
-            // child points back to the parent in its `parentid`.
-            //
-            // Reuploading the child isn't necessary for newer Desktops, which
-            // ignore the child's `parentid` and use the parent's `children`.
-            //
-            // However, older Desktop and Android use the child's `parentid` as
-            // canonical, while iOS is stricter and requires both to match.
-            let mut merged_child_node = self.two_way_merge(local_child_node, remote_child_node)?;
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
-            merged_node.merged_children.push(merged_child_node);
-            return Ok(());
+            (false, true) => {
+                // The item changed remotely, but not locally. Take the
+                // remote state, then merge remote children first, followed
+                // by local children.
+                if USER_CONTENT_ROOTS.contains(&remote_node.guid) {
+                    (ConflictResolution::Local, ConflictResolution::Remote)
+                } else {
+                    (ConflictResolution::Remote, ConflictResolution::Remote)
+                }
+            },
+
+            (_, false) => {
+                // The item changed locally, or is unchanged on both sides.
+                // Keep the local state, then merge local children first,
+                // followed by remote children.
+                (ConflictResolution::Local, ConflictResolution::Local)
+            }
+        }
+    }
+
+    /// Determines where to keep a child of a folder that exists on both sides.
+    fn resolve_structure_conflict(&self,
+                                  local_parent_node: Node<'t>,
+                                  local_child_node: Node<'t>,
+                                  remote_parent_node: Node<'t>,
+                                  remote_child_node: Node<'t>)
+                                  -> ConflictResolution
+    {
+        if USER_CONTENT_ROOTS.contains(&remote_child_node.guid) {
+            // Always use the local parent and position for roots.
+            return ConflictResolution::Local;
         }
 
         match (local_parent_node.needs_merge, remote_parent_node.needs_merge) {
@@ -549,205 +694,28 @@ impl<'t> Merger<'t> {
                 let latest_local_age = local_child_node.age.min(local_parent_node.age);
                 let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
 
-                // Did the child move to a different folder?
-                if local_parent_node.guid != remote_parent_node.guid {
-                    if latest_remote_age <= latest_local_age {
-                        // The remote move is newer, so we ignore the local
-                        // move. We'll merge the local child later, when we
-                        // walk its new remote parent.
-                        trace!("Local child {} reparented locally to {} at {} and remotely to {} \
-                                at {}; keeping child in newer remote parent",
-                               local_child_node,
-                               local_parent_node,
-                               latest_local_age,
-                               remote_parent_node,
-                               latest_remote_age);
-
-                        return Ok(());
-                    }
-
-                    // Otherwise, the local move is newer, so we merge the local
-                    // child now and ignore the remote move.
-                    trace!("Local child {} reparented locally to {} at {} and remotely to {} at \
-                            {}; keeping child in newer local parent",
-                           local_child_node,
-                           local_parent_node,
-                           latest_local_age,
-                           remote_parent_node,
-                           latest_remote_age);
-
-                    // Merge and flag both the new parent and child for
-                    // reupload. See above for why.
-                    let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                                   remote_child_node)?;
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_child_node.merge_state =
-                        merged_child_node.merge_state.with_new_structure();
-                    merged_node.merged_children.push(merged_child_node);
-                    return Ok(());
-                }
-
-                // Otherwise, the child was repositioned in the same folder.
-                // Compare timestamps to decide the child's new position.
                 if latest_remote_age <= latest_local_age {
-                    trace!("Local child {} repositioned locally in {} at {} and remotely in {} \
-                            at {}; keeping child in newer remote position",
-                           local_child_node,
-                           local_parent_node,
-                           latest_local_age,
-                           remote_parent_node,
-                           latest_remote_age);
-                    return Ok(());
+                    ConflictResolution::Remote
+                } else {
+                    ConflictResolution::Local
                 }
-
-                trace!("Local child {} repositioned locally in {} at {} and remotely in {} at \
-                        {}; keeping child in newer local position",
-                       local_child_node,
-                       local_parent_node,
-                       latest_local_age,
-                       remote_parent_node,
-                       latest_remote_age);
-
-                // For position changes in the same folder, we only need to
-                // merge and flag the parent for reupload.
-                let merged_child_node = self.two_way_merge(local_child_node,
-                                                           remote_child_node)?;
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                merged_node.merged_children.push(merged_child_node);
-                Ok(())
             },
 
             (true, false) => {
                 // If only the local parent changed, keep the local child in its
                 // new parent.
-                if local_parent_node.guid != remote_parent_node.guid {
-                    trace!("Local child {} reparented locally to {}",
-                           local_child_node,
-                           local_parent_node);
+                ConflictResolution::Local
+            },
 
-                    // Merge and flag both the new parent and child for
-                    // reupload.
-                    let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                                   remote_child_node)?;
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_child_node.merge_state =
-                        merged_child_node.merge_state.with_new_structure();
-                    merged_node.merged_children.push(merged_child_node);
-                    return Ok(());
+            (false, true) => {
+                if USER_CONTENT_ROOTS.contains(&remote_child_node.guid) {
+                    ConflictResolution::Local
+                } else {
+                    ConflictResolution::Remote
                 }
-
-                // Otherwise, the child was repositioned locally.
-                trace!("Local child {} repositioned locally in {}",
-                       local_child_node,
-                       local_parent_node);
-
-                // Only flag the parent of the repositioned local child for
-                // reupload.
-                let merged_child_node = self.two_way_merge(local_child_node,
-                                                           remote_child_node)?;
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                merged_node.merged_children.push(merged_child_node);
-                Ok(())
             },
 
-            (false, _) => {
-                trace!("Local child {} unchanged locally; keeping child in remote parent {}",
-                       local_child_node,
-                       remote_parent_node);
-                Ok(())
-            },
-        }
-    }
-
-    fn merge_remote_child_node_with_local_child_node(&mut self,
-                                                     merged_node: &mut MergedNode<'t>,
-                                                     local_parent_node: Node<'t>,
-                                                     local_child_node: Node<'t>,
-                                                     remote_parent_node: Node<'t>,
-                                                     remote_child_node: Node<'t>)
-                                                     -> Result<()>
-    {
-        trace!("Remote child {} exists locally in {} and remotely in {}",
-               remote_child_node,
-               local_parent_node,
-               remote_parent_node);
-
-        if self.remote_tree.is_deleted(&local_parent_node.guid) {
-            trace!("Unconditionally taking remote move for {} to {} because local parent {} is \
-                    deleted remotely",
-                   remote_child_node,
-                   remote_parent_node,
-                   local_parent_node);
-
-            let merged_child_node = self.two_way_merge(local_child_node, remote_child_node)?;
-            merged_node.merged_children.push(merged_child_node);
-
-            return Ok(());
-        }
-
-        match (local_parent_node.needs_merge, remote_parent_node.needs_merge) {
-            (true, true) => {
-                // If both parents changed, compare timestamps to decide where
-                // to keep the remote child.
-                let latest_local_age = local_child_node.age.min(local_parent_node.age);
-                let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
-
-                if latest_remote_age > latest_local_age {
-                    // The local move is newer, so we ignore the remote move.
-                    // We'll merge the remote child later, when we walk its new
-                    // local parent. Note that, since we only flag the remote
-                    // parent here, we don't need to handle reparenting and
-                    // repositioning separately.
-                    trace!("Remote child {} moved locally to {} at {} and remotely to {} at {}; \
-                            keeping child in newer local parent and position",
-                           remote_child_node,
-                           local_parent_node,
-                           latest_local_age,
-                           remote_parent_node,
-                           latest_remote_age);
-
-                    // Flag the old parent for reupload, since we're moving the
-                    // remote child.
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    return Ok(());
-                }
-
-                // Otherwise, the remote move is newer, so we merge the remote
-                // child now and ignore the local move.
-                trace!("Remote child {} moved locally to {} at {} and remotely to {} at {}; \
-                        keeping child in newer remote parent and position",
-                       remote_child_node,
-                       local_parent_node,
-                       latest_local_age,
-                       remote_parent_node,
-                       latest_remote_age);
-
-                let merged_child_node = self.two_way_merge(local_child_node,
-                                                           remote_child_node)?;
-                merged_node.merged_children.push(merged_child_node);
-                Ok(())
-            },
-
-            (true, false) => {
-                trace!("Remote child {} moved locally to {}",
-                       remote_child_node,
-                       local_parent_node);
-
-                // Only flag the parent of the remote child for reupload.
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                Ok(())
-            },
-
-            (false, _) => {
-                trace!("Remote child {} unchanged locally; keeping child in remote parent {}",
-                       remote_child_node,
-                       remote_parent_node);
-
-                let merged_child_node = self.two_way_merge(local_child_node,
-                                                           remote_child_node)?;
-                merged_node.merged_children.push(merged_child_node);
-                Ok(())
-            },
+            (false, false) => ConflictResolution::Remote
         }
     }
 
@@ -1228,7 +1196,7 @@ mod tests {
     }
 
     macro_rules! nodes {
-        ($children:tt) => { nodes!(ROOT_GUID, Folder, $children) };
+        ($children:tt) => { nodes!(ROOT_GUID, Folder[needs_merge = true], $children) };
         ($guid:expr, $kind:ident) => { nodes!(Guid::from($guid), $kind[]) };
         ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
             let mut item = Item::new(Guid::from($guid), Kind::$kind);
@@ -1293,6 +1261,9 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
+            }),
             ("unfiled_____", Folder, {
                 ("folderBBBBBB", Folder, {
                     ("bookmarkDDDD", Bookmark),
@@ -1304,9 +1275,6 @@ mod tests {
                 ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkEEEE", Bookmark)
                 })
-            }),
-            ("menu________", Folder[needs_merge = true], {
-                ("bookmarkFFFF", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_telem = StructureCounts::default();
@@ -1448,6 +1416,89 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_newer_changed_older() {
+        before_each();
+
+        let _shared_tree = nodes!({
+            ("menu________", Folder[age = 5], {
+                ("folderAAAAAA", Folder[age = 5]),
+                ("bookmarkBBBB", Bookmark[age = 5])
+            }),
+            ("toolbar_____", Folder[age = 5], {
+                ("folderCCCCCC", Folder[age = 5]),
+                ("bookmarkDDDD", Bookmark[age = 5])
+            })
+        }).into_tree().unwrap();
+
+        let mut local_tree = nodes!({
+            // Even though the local menu is newer (local = 5s, remote = 9s;
+            // adding E updated the modified times of A and the menu), it's
+            // not *changed* locally, so we should merge remote children first.
+            ("menu________", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
+                    ("bookmarkEEEE", Bookmark[needs_merge = true])
+                }),
+                ("bookmarkBBBB", Bookmark[age = 5])
+            }),
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("bookmarkDDDD", Bookmark[age = 5])
+            })
+        }).into_tree().unwrap();
+        local_tree.note_deleted("folderCCCCCC".into());
+
+        let mut remote_tree = nodes!({
+            ("menu________", Folder[needs_merge = true, age = 5], {
+                ("bookmarkBBBB", Bookmark[age = 5])
+            }),
+            // Even though the remote toolbar is newer (local = 15s, remote = 10s), it's
+            // not changed remotely, so we should merge local children first.
+            ("toolbar_____", Folder[age = 5], {
+                ("folderCCCCCC", Folder[needs_merge = true], {
+                    ("bookmarkFFFF", Bookmark[needs_merge = true])
+                }),
+                ("bookmarkDDDD", Bookmark[age = 5])
+            })
+        }).into_tree().unwrap();
+        remote_tree.note_deleted("folderAAAAAA".into());
+
+        let mut merger = Merger::new(&local_tree, &remote_tree);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkBBBB", Bookmark[age = 5]),
+                ("bookmarkEEEE", Bookmark[needs_merge = true])
+            }),
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("bookmarkDDDD", Bookmark[age = 5]),
+                ("bookmarkFFFF", Bookmark[needs_merge = true])
+            })
+        }).into_tree().unwrap();
+        let expected_deletions = vec![
+            "folderAAAAAA",
+            "folderCCCCCC",
+        ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+        let expected_telem = StructureCounts {
+            remote_revives: 0,
+            local_deletes: 1,
+            local_revives: 0,
+            remote_deletes: 1,
+            dupes: 0,
+        };
+
+        let merged_tree = merged_root.into_tree().unwrap();
+        assert_eq!(merged_tree, expected_tree);
+
+        let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+        deletions.sort_unstable();
+        assert_eq!(deletions, expected_deletions);
+
+        assert_eq!(merger.telemetry(), &expected_telem);
+    }
+
+    #[test]
     fn value_structure_conflict() {
         before_each();
 
@@ -1528,22 +1579,22 @@ mod tests {
 
         let local_tree = nodes!({
             ("menu________", Folder, {
-                ("folderAAAAAA", Folder, {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkBBBB", Bookmark),
                     ("bookmarkCCCC", Bookmark),
-                    ("bookmarkDDDD", Bookmark)
+                    ("bookmarkDDDD", Bookmark[needs_merge = true])
                 })
             })
         }).into_tree().unwrap();
 
         let remote_tree = nodes!({
-            ("menu________", Folder, {
-                ("bookmarkCCCC", Bookmark)
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkCCCC", Bookmark[needs_merge = true])
             }),
-            ("toolbar_____", Folder, {
-                ("folderAAAAAA", Folder, {
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("folderAAAAAA", Folder[needs_merge = true], {
                     ("bookmarkBBBB", Bookmark),
-                    ("bookmarkEEEE", Bookmark)
+                    ("bookmarkEEEE", Bookmark[needs_merge = true])
                 })
             })
         }).into_tree().unwrap();
@@ -1930,11 +1981,11 @@ mod tests {
                 ("bookmarkBBBB", Bookmark),
                 ("bookmarkEEEE", Bookmark[needs_merge = true])
             }),
-            ("unfiled_____", Folder, {
-                ("bookmarkCCCC", Bookmark)
-            }),
             ("mobile______", Folder[needs_merge = true], {
                 ("bookmarkFFFF", Bookmark[needs_merge = true])
+            }),
+            ("unfiled_____", Folder, {
+                ("bookmarkCCCC", Bookmark)
             })
         }).into_tree().unwrap();
         let expected_deletions = vec![
@@ -2446,12 +2497,12 @@ mod tests {
         assert!(merger.subsumes(&remote_tree));
 
         let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkBBBB", Bookmark[needs_merge = true])
+            }),
             ("unfiled_____", Folder[needs_merge = true], {
                 ("bookmarkJJJJ", Bookmark[needs_merge = true]),
                 ("bookmarkGGGG", Bookmark)
-            }),
-            ("menu________", Folder[needs_merge = true], {
-                ("bookmarkBBBB", Bookmark[needs_merge = true])
             })
         }).into_tree().unwrap();
         let expected_deletions = vec![
@@ -2497,7 +2548,7 @@ mod tests {
         assert!(merger.subsumes(&local_tree));
         assert!(merger.subsumes(&remote_tree));
 
-        let expected_tree = nodes!({
+        let expected_tree = nodes!(ROOT_GUID, Folder, {
             ("mobile______", Folder, {
                 ("emptyempty01", Folder),
                 ("emptyempty02", Folder)
