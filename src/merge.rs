@@ -637,7 +637,7 @@ impl<'t> Merger<'t> {
         match (local_node.needs_merge, remote_node.needs_merge) {
             (true, true) => {
                 // The item changed locally and remotely.
-                if local_node.newer_than(&remote_node) {
+                if local_node.age < remote_node.age {
                     // The local change is newer, so merge local children first,
                     // followed by remaining unmerged remote children.
                     (ConflictResolution::Local, ConflictResolution::Local)
@@ -694,10 +694,10 @@ impl<'t> Merger<'t> {
                 let latest_local_age = local_child_node.age.min(local_parent_node.age);
                 let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
 
-                if latest_remote_age <= latest_local_age {
-                    ConflictResolution::Remote
-                } else {
+                if latest_local_age < latest_remote_age {
                     ConflictResolution::Local
+                } else {
+                    ConflictResolution::Remote
                 }
             },
 

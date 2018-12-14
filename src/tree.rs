@@ -314,11 +314,6 @@ impl Item {
         self.kind == Kind::Folder
     }
 
-    #[inline]
-    pub fn newer_than(&self, other: &Item) -> bool {
-        self.age < other.age
-    }
-
     pub fn has_compatible_kind(&self, remote_node: &Item) -> bool {
         match (&self.kind, &remote_node.kind) {
             // Bookmarks and queries are interchangeable, as simply changing the URL
