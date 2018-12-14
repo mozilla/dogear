@@ -371,29 +371,18 @@ impl<'t> MergedNode<'t> {
     /// Indicates whether to prefer the remote side when applying the merged tree.
     pub fn use_remote(&self) -> bool {
         match self.merge_state {
-            MergeState::Local { .. } | MergeState::LocalWithNewStructure { .. } => false,
-            MergeState::Remote { local_node, remote_node } => {
-                // If the item exists on both sides, check if the remote node
-                // changed. Otherwise, unconditionally take the remote state.
-                local_node.map(|_| remote_node.needs_merge).unwrap_or(true)
-            },
-            MergeState::RemoteWithNewStructure { local_node, remote_node } => {
-                local_node.map(|_| remote_node.needs_merge).unwrap_or(true)
-            },
+            MergeState::Remote { .. } | MergeState::RemoteWithNewStructure { .. } => true,
+            _ => false,
         }
     }
 
     /// Indicates whether the merged item should be (re)uploaded to the server.
     pub fn needs_upload(&self) -> bool {
         match self.merge_state {
-            MergeState::Local { local_node, remote_node } => {
-                // If the item exists on both sides, check if the local node
-                // changed. Otherwise, unconditionally upload the local state.
-                remote_node.map(|_| local_node.needs_merge).unwrap_or(true)
-            }
-            MergeState::Remote { .. } => false,
-            MergeState::LocalWithNewStructure { .. }
+            MergeState::Local { .. }
+            | MergeState::LocalWithNewStructure { .. }
             | MergeState::RemoteWithNewStructure { .. } => true,
+            _ => false,
         }
     }
 
@@ -404,7 +393,9 @@ impl<'t> MergedNode<'t> {
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
             item.needs_merge = match merged_node.merge_state {
-                MergeState::Local { .. } | MergeState::Remote { .. } => false,
+                MergeState::Local { .. }
+                | MergeState::Remote { .. }
+                | MergeState::Unchanged { .. } => false,
                 _ => true,
             };
             item
@@ -459,6 +450,7 @@ impl<'t> MergedNode<'t> {
             MergeState::Remote { remote_node, .. } => remote_node,
             MergeState::LocalWithNewStructure { local_node, .. } => local_node,
             MergeState::RemoteWithNewStructure { remote_node, .. } => remote_node,
+            MergeState::Unchanged { remote_node, .. } => remote_node,
         }
     }
 }
@@ -494,6 +486,9 @@ pub enum MergeState<'t> {
     /// A remote merge state with new structure means we should prefer the
     /// remote value and reupload the new structure.
     RemoteWithNewStructure { local_node: Option<Node<'t>>, remote_node: Node<'t> },
+
+    /// An unchanged merge state means we don't need to do anything to the item.
+    Unchanged { local_node: Node<'t>, remote_node: Node<'t> },
 }
 
 impl<'t> MergeState<'t> {
@@ -507,8 +502,17 @@ impl<'t> MergeState<'t> {
 
     pub fn with_new_structure(&self) -> MergeState<'t> {
         match *self {
-            MergeState::Local { local_node, remote_node } => MergeState::LocalWithNewStructure { local_node, remote_node },
-            MergeState::Remote { local_node, remote_node } => MergeState::RemoteWithNewStructure { local_node, remote_node },
+            MergeState::Local { local_node, remote_node } => {
+                MergeState::LocalWithNewStructure { local_node, remote_node }
+            },
+            MergeState::Remote { local_node, remote_node } => {
+                MergeState::RemoteWithNewStructure { local_node, remote_node }
+            },
+            MergeState::Unchanged { local_node, remote_node } => {
+                // Once the structure changes, it doesn't matter which side we
+                // pick; we'll need to reupload the item to the server, anyway.
+                MergeState::LocalWithNewStructure { local_node, remote_node: Some(remote_node) }
+            },
             state => state,
         }
     }
@@ -521,6 +525,7 @@ impl<'t> fmt::Display for MergeState<'t> {
             MergeState::Remote { .. } => "(Remote, Remote)",
             MergeState::LocalWithNewStructure { .. } => "(Local, New)",
             MergeState::RemoteWithNewStructure { .. } => "(Remote, New)",
+            MergeState::Unchanged { .. } => "(Unchanged, Unchanged)"
         })
     }
 }

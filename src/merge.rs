@@ -61,6 +61,7 @@ pub struct Deletion {
 enum ConflictResolution {
     Local,
     Remote,
+    Unchanged,
 }
 
 /// A two-way merger that produces a complete merged tree from a complete local
@@ -281,6 +282,9 @@ impl<'t> Merger<'t> {
             ConflictResolution::Remote => {
                 MergeState::Remote { local_node: Some(local_node), remote_node }
             },
+            ConflictResolution::Unchanged => {
+                MergeState::Unchanged { local_node, remote_node }
+            },
         });
 
         match children {
@@ -299,7 +303,7 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            ConflictResolution::Remote => {
+            ConflictResolution::Remote | ConflictResolution::Unchanged => {
                 for remote_child_node in remote_node.children() {
                     self.merge_remote_child_into_merged_node(&mut merged_node,
                                                              Some(local_node),
@@ -417,7 +421,7 @@ impl<'t> Merger<'t> {
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 },
 
-                ConflictResolution::Remote => {
+                ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we merge the remote
                     // child now and ignore the local move.
                     trace!("Remote child {} moved locally to {} and remotely to {}; \
@@ -570,7 +574,7 @@ impl<'t> Merger<'t> {
                     }
                 },
 
-                ConflictResolution::Remote => {
+                ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we ignore the local
                     // move. We'll merge the local child later, when we
                     // walk its new remote parent.
@@ -654,6 +658,13 @@ impl<'t> Merger<'t> {
                 }
             },
 
+            (true, false) => {
+                // The item changed locally, but not remotely. Keep the local
+                // state, then merge local children first, followed by remote
+                // children.
+                (ConflictResolution::Local, ConflictResolution::Local)
+            },
+
             (false, true) => {
                 // The item changed remotely, but not locally. Take the
                 // remote state, then merge remote children first, followed
@@ -665,11 +676,9 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            (_, false) => {
-                // The item changed locally, or is unchanged on both sides.
-                // Keep the local state, then merge local children first,
-                // followed by remote children.
-                (ConflictResolution::Local, ConflictResolution::Local)
+            (false, false) => {
+                // The item is unchanged on both sides.
+                (ConflictResolution::Unchanged, ConflictResolution::Unchanged)
             }
         }
     }
@@ -715,7 +724,7 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            (false, false) => ConflictResolution::Remote
+            (false, false) => ConflictResolution::Unchanged
         }
     }
 
@@ -1397,9 +1406,9 @@ mod tests {
             ("menu________", Folder[needs_merge = true], {
                 // The server has an older menu, so we should use the local order (C A B)
                 // as the base, then append (I J).
-                ("bookmarkCCCC", Bookmark),
-                ("bookmarkAAAA", Bookmark),
-                ("bookmarkBBBB", Bookmark),
+                ("bookmarkCCCC", Bookmark[age = 5]),
+                ("bookmarkAAAA", Bookmark[age = 5]),
+                ("bookmarkBBBB", Bookmark[age = 5]),
                 ("bookmarkIIII", Bookmark),
                 ("bookmarkJJJJ", Bookmark)
             }),
