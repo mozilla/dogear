@@ -884,6 +884,10 @@ impl<'t> Merger<'t> {
                                               -> Result<()>
     {
         for remote_child_node in remote_node.children() {
+            if self.merged_guids.contains(&remote_child_node.guid) {
+                trace!("Remote child {} can't be an orphan; already merged", remote_child_node);
+                continue;
+            }
             match self.check_for_local_structure_change_of_remote_node(merged_node,
                                                                        remote_node,
                                                                        remote_child_node)?
@@ -927,6 +931,10 @@ impl<'t> Merger<'t> {
                                              -> Result<()>
     {
         for local_child_node in local_node.children() {
+            if self.merged_guids.contains(&local_child_node.guid) {
+                trace!("Local child {} can't be an orphan; already merged", local_child_node);
+                continue;
+            }
             match self.check_for_remote_structure_change_of_local_node(merged_node,
                                                                        local_node,
                                                                        local_child_node)?
