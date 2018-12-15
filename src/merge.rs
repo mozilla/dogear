@@ -1507,6 +1507,202 @@ mod tests {
     }
 
     #[test]
+    fn newer_local_moves() {
+        before_each();
+
+        let _shared_tree = nodes!({
+            ("menu________", Folder[age = 10], {
+                ("bookmarkAAAA", Bookmark[age = 10]),
+                ("folderBBBBBB", Folder[age = 10], {
+                    ("bookmarkCCCC", Bookmark[age = 10])
+                }),
+                ("folderDDDDDD", Folder[age = 10])
+            }),
+            ("toolbar_____", Folder[age = 10], {
+                ("bookmarkEEEE", Bookmark[age = 10]),
+                ("folderFFFFFF", Folder[age = 10], {
+                    ("bookmarkGGGG", Bookmark[age = 10])
+                }),
+                ("folderHHHHHH", Folder[age = 10])
+            })
+        }).into_tree().unwrap();
+
+        let local_tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("folderDDDDDD", Folder[needs_merge = true], {
+                    ("bookmarkCCCC", Bookmark[needs_merge = true])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("folderHHHHHH", Folder[needs_merge = true], {
+                    ("bookmarkGGGG", Bookmark[needs_merge = true])
+                }),
+                ("folderFFFFFF", Folder[needs_merge = true]),
+                ("bookmarkEEEE", Bookmark[age = 10])
+            }),
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true])
+            }),
+            ("mobile______", Folder[needs_merge = true], {
+                ("folderBBBBBB", Folder[needs_merge = true])
+            })
+        }).into_tree().unwrap();
+
+        let remote_tree = nodes!({
+            ("mobile______", Folder[needs_merge = true, age = 5], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5])
+            }),
+            ("unfiled_____", Folder[needs_merge = true, age = 5], {
+                ("folderBBBBBB", Folder[needs_merge = true, age = 5])
+            }),
+            ("menu________", Folder[needs_merge = true, age = 5], {
+                ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
+                    ("bookmarkGGGG", Bookmark[needs_merge = true, age = 5])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("folderFFFFFF", Folder[needs_merge = true, age = 5]),
+                ("bookmarkEEEE", Bookmark[age = 10]),
+                ("folderHHHHHH", Folder[needs_merge = true, age = 5], {
+                    ("bookmarkCCCC", Bookmark[needs_merge = true, age = 5])
+                })
+            })
+        }).into_tree().unwrap();
+
+        let mut merger = Merger::new(&local_tree, &remote_tree);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree = nodes!({
+            ("menu________", Folder[needs_merge = true], {
+                ("folderDDDDDD", Folder[needs_merge = true], {
+                    ("bookmarkCCCC", Bookmark[needs_merge = true])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("folderHHHHHH", Folder[needs_merge = true], {
+                    ("bookmarkGGGG", Bookmark[needs_merge = true])
+                }),
+                ("folderFFFFFF", Folder),
+                ("bookmarkEEEE", Bookmark[age = 10])
+            }),
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true])
+            }),
+            ("mobile______", Folder[needs_merge = true], {
+                ("folderBBBBBB", Folder[needs_merge = true])
+            })
+        }).into_tree().unwrap();
+        let expected_telem = StructureCounts::default();
+
+        let merged_tree = merged_root.into_tree().unwrap();
+        assert_eq!(merged_tree, expected_tree);
+
+        assert_eq!(merger.deletions().count(), 0);
+
+        assert_eq!(merger.telemetry(), &expected_telem);
+    }
+
+    #[test]
+    fn newer_remote_moves() {
+        before_each();
+
+        let _shared_tree = nodes!({
+            ("menu________", Folder[age = 10], {
+                ("bookmarkAAAA", Bookmark[age = 10]),
+                ("folderBBBBBB", Folder[age = 10], {
+                    ("bookmarkCCCC", Bookmark[age = 10])
+                }),
+                ("folderDDDDDD", Folder[age = 10])
+            }),
+            ("toolbar_____", Folder[age = 10], {
+                ("bookmarkEEEE", Bookmark[age = 10]),
+                ("folderFFFFFF", Folder[age = 10], {
+                    ("bookmarkGGGG", Bookmark[age = 10])
+                }),
+                ("folderHHHHHH", Folder[age = 10])
+            })
+        }).into_tree().unwrap();
+
+        let local_tree = nodes!({
+            ("menu________", Folder[needs_merge = true, age = 5], {
+                ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
+                    ("bookmarkCCCC", Bookmark[needs_merge = true, age = 5])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true, age = 5], {
+                ("folderHHHHHH", Folder[needs_merge = true, age = 5], {
+                    ("bookmarkGGGG", Bookmark[needs_merge = true, age = 5])
+                }),
+                ("folderFFFFFF", Folder[needs_merge = true, age = 5]),
+                ("bookmarkEEEE", Bookmark[age = 10])
+            }),
+            ("unfiled_____", Folder[needs_merge = true, age = 5], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5])
+            }),
+            ("mobile______", Folder[needs_merge = true, age = 5], {
+                ("folderBBBBBB", Folder[needs_merge = true, age = 5])
+            })
+        }).into_tree().unwrap();
+
+        let remote_tree = nodes!({
+            ("mobile______", Folder[needs_merge = true], {
+                ("bookmarkAAAA", Bookmark[needs_merge = true])
+            }),
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("folderBBBBBB", Folder[needs_merge = true])
+            }),
+            ("menu________", Folder[needs_merge = true], {
+                ("folderDDDDDD", Folder[needs_merge = true], {
+                    ("bookmarkGGGG", Bookmark[needs_merge = true])
+                })
+            }),
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("folderFFFFFF", Folder[needs_merge = true]),
+                ("bookmarkEEEE", Bookmark[age = 10]),
+                ("folderHHHHHH", Folder[needs_merge = true], {
+                    ("bookmarkCCCC", Bookmark[needs_merge = true])
+                })
+            })
+        }).into_tree().unwrap();
+
+        let mut merger = Merger::new(&local_tree, &remote_tree);
+        let merged_root = merger.merge().unwrap();
+        assert!(merger.subsumes(&local_tree));
+        assert!(merger.subsumes(&remote_tree));
+
+        let expected_tree = nodes!({
+            ("menu________", Folder[age = 5], {
+                ("folderDDDDDD", Folder, {
+                    ("bookmarkGGGG", Bookmark)
+                })
+            }),
+            ("toolbar_____", Folder[age = 5], {
+                ("folderFFFFFF", Folder),
+                ("bookmarkEEEE", Bookmark[age = 10]),
+                ("folderHHHHHH", Folder, {
+                    ("bookmarkCCCC", Bookmark)
+                })
+            }),
+            ("unfiled_____", Folder[age = 5], {
+                ("folderBBBBBB", Folder)
+            }),
+            ("mobile______", Folder[age = 5], {
+                ("bookmarkAAAA", Bookmark)
+            })
+        }).into_tree().unwrap();
+        let expected_telem = StructureCounts::default();
+
+        let merged_tree = merged_root.into_tree().unwrap();
+        assert_eq!(merged_tree, expected_tree);
+
+        assert_eq!(merger.deletions().count(), 0);
+
+        assert_eq!(merger.telemetry(), &expected_telem);
+    }
+
+    #[test]
     fn value_structure_conflict() {
         before_each();
 
