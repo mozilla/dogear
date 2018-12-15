@@ -6,4 +6,4 @@ Currently, Dogear only implements merging, and doesn't handle storage or syncing
 
 ## Requirements
 
-* Rust 1.2.8 or higher
+* Rust 1.31.0 or higher
