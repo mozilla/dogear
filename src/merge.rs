@@ -61,6 +61,7 @@ pub struct Deletion {
 enum ConflictResolution {
     Local,
     Remote,
+    Unchanged,
 }
 
 /// A two-way merger that produces a complete merged tree from a complete local
@@ -212,7 +213,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(local_node.guid.clone());
 
         let mut merged_node = MergedNode::new(local_node.guid.clone(),
-                                              MergeState::local(local_node));
+                                              MergeState::Local(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -234,7 +235,7 @@ impl<'t> Merger<'t> {
         self.merged_guids.insert(remote_node.guid.clone());
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(),
-                                              MergeState::remote(remote_node));
+                                              MergeState::Remote(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -276,10 +277,13 @@ impl<'t> Merger<'t> {
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
             ConflictResolution::Local => {
-                MergeState::Local { local_node, remote_node: Some(remote_node) }
+                MergeState::Local(local_node)
             },
             ConflictResolution::Remote => {
-                MergeState::Remote { local_node: Some(local_node), remote_node }
+                MergeState::Remote(remote_node)
+            },
+            ConflictResolution::Unchanged => {
+                MergeState::Unchanged { local_node, remote_node }
             },
         });
 
@@ -299,7 +303,7 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            ConflictResolution::Remote => {
+            ConflictResolution::Remote | ConflictResolution::Unchanged => {
                 for remote_child_node in remote_node.children() {
                     self.merge_remote_child_into_merged_node(&mut merged_node,
                                                              Some(local_node),
@@ -417,7 +421,7 @@ impl<'t> Merger<'t> {
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 },
 
-                ConflictResolution::Remote => {
+                ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we merge the remote
                     // child now and ignore the local move.
                     trace!("Remote child {} moved locally to {} and remotely to {}; \
@@ -570,7 +574,7 @@ impl<'t> Merger<'t> {
                     }
                 },
 
-                ConflictResolution::Remote => {
+                ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we ignore the local
                     // move. We'll merge the local child later, when we
                     // walk its new remote parent.
@@ -637,7 +641,7 @@ impl<'t> Merger<'t> {
         match (local_node.needs_merge, remote_node.needs_merge) {
             (true, true) => {
                 // The item changed locally and remotely.
-                if local_node.newer_than(&remote_node) {
+                if local_node.age < remote_node.age {
                     // The local change is newer, so merge local children first,
                     // followed by remaining unmerged remote children.
                     (ConflictResolution::Local, ConflictResolution::Local)
@@ -654,6 +658,13 @@ impl<'t> Merger<'t> {
                 }
             },
 
+            (true, false) => {
+                // The item changed locally, but not remotely. Keep the local
+                // state, then merge local children first, followed by remote
+                // children.
+                (ConflictResolution::Local, ConflictResolution::Local)
+            },
+
             (false, true) => {
                 // The item changed remotely, but not locally. Take the
                 // remote state, then merge remote children first, followed
@@ -665,11 +676,9 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            (_, false) => {
-                // The item changed locally, or is unchanged on both sides.
-                // Keep the local state, then merge local children first,
-                // followed by remote children.
-                (ConflictResolution::Local, ConflictResolution::Local)
+            (false, false) => {
+                // The item is unchanged on both sides.
+                (ConflictResolution::Unchanged, ConflictResolution::Unchanged)
             }
         }
     }
@@ -694,10 +703,10 @@ impl<'t> Merger<'t> {
                 let latest_local_age = local_child_node.age.min(local_parent_node.age);
                 let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
 
-                if latest_remote_age <= latest_local_age {
-                    ConflictResolution::Remote
-                } else {
+                if latest_local_age < latest_remote_age {
                     ConflictResolution::Local
+                } else {
+                    ConflictResolution::Remote
                 }
             },
 
@@ -715,7 +724,7 @@ impl<'t> Merger<'t> {
                 }
             },
 
-            (false, false) => ConflictResolution::Remote
+            (false, false) => ConflictResolution::Unchanged
         }
     }
 
