@@ -21,6 +21,9 @@ mod merge;
 mod store;
 mod tree;
 
+#[cfg(test)]
+mod tests;
+
 pub use error::{Error, ErrorKind, Result};
 pub use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 pub use merge::{Deletion, Merger, StructureCounts};
