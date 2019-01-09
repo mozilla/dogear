@@ -46,6 +46,7 @@ impl fmt::Display for Error {
 pub enum ErrorKind {
     MismatchedItemKind(Kind, Kind),
     DuplicateItem(Guid),
+    MissingItem(Guid),
     InvalidParent(Guid, Guid),
     MissingParent(Guid, Guid),
     Storage(&'static str, u32),
@@ -63,6 +64,9 @@ impl fmt::Display for ErrorKind {
             },
             ErrorKind::DuplicateItem(guid) => {
                 write!(f, "Item {} already exists in tree", guid)
+            },
+            ErrorKind::MissingItem(guid) => {
+                write!(f, "Item {} is an orphan", guid)
             },
             ErrorKind::InvalidParent(child_guid, parent_guid) => {
                 write!(f, "Can't insert item {} into non-folder {}",

@@ -35,7 +35,13 @@ pub struct Tree {
 
 impl Default for Tree {
     fn default() -> Self {
-        Tree::new(Item::new(ROOT_GUID.clone(), Kind::Folder))
+        Tree::new(Item::Existing {
+            guid: ROOT_GUID.clone(),
+            parent_guid: None,
+            kind: Kind::Folder,
+            age: 0,
+            needs_merge: false,
+        })
     }
 }
 
@@ -43,7 +49,7 @@ impl Tree {
     /// Constructs a new rooted tree.
     pub fn new(root: Item) -> Tree {
         let mut index_by_guid = HashMap::new();
-        index_by_guid.insert(root.guid.clone(), 0);
+        index_by_guid.insert(root.guid().clone(), 0);
 
         let entries = vec![Entry { parent_index: None,
                                    item: root,
@@ -86,16 +92,16 @@ impl Tree {
     }
 
     pub fn insert(&mut self, parent_guid: &Guid, item: Item) -> Result<()> {
-        if self.index_by_guid.contains_key(&item.guid) {
-            return Err(ErrorKind::DuplicateItem(item.guid.clone()).into());
+        if self.index_by_guid.contains_key(item.guid()) {
+            return Err(ErrorKind::DuplicateItem(item.guid().clone()).into());
         }
         let child_index = self.entries.len();
         let (parent_index, level, is_syncable) = match self.index_by_guid.get(&parent_guid) {
             Some(parent_index) => {
                 let parent = &mut self.entries[*parent_index];
                 if !parent.item.is_folder() {
-                    return Err(ErrorKind::InvalidParent(item.guid.clone(),
-                                                        parent.item.guid.clone()).into());
+                    return Err(ErrorKind::InvalidParent(item.guid().clone(),
+                                                        parent.item.guid().clone()).into());
                 }
                 parent.child_indices.push(child_index);
 
@@ -111,14 +117,14 @@ impl Tree {
                 // and roots, we'll determine that the items are non-syncable
                 // when merging, remove them locally, and mark them for deletion
                 // remotely.
-                let is_syncable = USER_CONTENT_ROOTS.contains(&item.guid) || parent.is_syncable;
+                let is_syncable = USER_CONTENT_ROOTS.contains(item.guid()) || parent.is_syncable;
 
                 (*parent_index, parent.level + 1, is_syncable)
             },
-            None => return Err(ErrorKind::MissingParent(item.guid.clone(),
+            None => return Err(ErrorKind::MissingParent(item.guid().clone(),
                                                         parent_guid.clone()).into()),
         };
-        self.index_by_guid.insert(item.guid.clone(), child_index);
+        self.index_by_guid.insert(item.guid().clone(), child_index);
         self.entries.push(Entry { parent_index: Some(parent_index),
                                   item,
                                   level,
@@ -166,8 +172,8 @@ impl PartialEq for Tree {
                 }
                 match (entry.parent_index, other_entry.parent_index) {
                     (Some(parent_index), Some(other_parent_index)) => {
-                        let parent_guid = &self.entries[parent_index].item.guid;
-                        let other_parent_guid = &other.entries[other_parent_index].item.guid;
+                        let parent_guid = &self.entries[parent_index].item.guid();
+                        let other_parent_guid = &other.entries[other_parent_index].item.guid();
                         if parent_guid != other_parent_guid {
                             return false;
                         }
@@ -177,11 +183,11 @@ impl PartialEq for Tree {
                 };
                 let child_guids = entry.child_indices
                                        .iter()
-                                       .map(|index| &self.entries[*index].item.guid);
+                                       .map(|index| self.entries[*index].item.guid());
                 let other_child_guids =
                     other_entry.child_indices
                                .iter()
-                               .map(|other_index| &other.entries[*other_index].item.guid);
+                               .map(|other_index| other.entries[*other_index].item.guid());
                 if child_guids.ne(other_child_guids) {
                     return false;
                 }
@@ -259,21 +265,24 @@ impl<'t> Node<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        match self.1.item.kind {
-            Kind::Folder => {
-                match self.1.child_indices.len() {
-                    0 => format!("{}📂 {}", prefix, &self.1.item),
-                    _ => {
-                        let children_prefix = format!("{}| ", prefix);
-                        let children = self.children()
-                                           .map(|n| n.to_ascii_fragment(&children_prefix))
-                                           .collect::<Vec<String>>()
-                                           .join("\n");
-                        format!("{}📂 {}\n{}", prefix, &self.1.item, children)
-                    },
-                }
-            },
-            _ => format!("{}🔖 {}", prefix, &self.1.item),
+        match &self.1.item {
+            Item::Missing(guid) => format!("{}❓ {}", prefix, guid),
+            Item::Existing { kind, .. } => match kind {
+                Kind::Folder => {
+                    match self.1.child_indices.len() {
+                        0 => format!("{}📂 {}", prefix, &self.1.item),
+                        _ => {
+                            let children_prefix = format!("{}| ", prefix);
+                            let children = self.children()
+                                            .map(|n| n.to_ascii_fragment(&children_prefix))
+                                            .collect::<Vec<String>>()
+                                            .join("\n");
+                            format!("{}📂 {}\n{}", prefix, &self.1.item, children)
+                        },
+                    }
+                },
+                _ => format!("{}🔖 {}", prefix, &self.1.item),
+            }
         }
     }
 }
@@ -293,46 +302,81 @@ impl<'t> fmt::Display for Node<'t> {
 }
 
 /// An item in a local or remote bookmark tree.
-#[derive(Debug, Eq, PartialEq)]
-pub struct Item {
-    pub guid: Guid,
-    pub kind: Kind,
-    pub age: i64,
-    pub needs_merge: bool,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Item {
+    Missing(Guid),
+    Existing {
+        guid: Guid,
+        parent_guid: Option<Guid>,
+        kind: Kind,
+        age: i64,
+        needs_merge: bool,
+    },
 }
 
 impl Item {
-    pub fn new(guid: Guid, kind: Kind) -> Item {
-        Item { guid,
-               kind,
-               age: 0,
-               needs_merge: false, }
+    #[inline]
+    pub fn guid(&self) -> &Guid {
+        match self {
+            Item::Missing(guid) => guid,
+            Item::Existing { guid, .. } => guid
+        }
+    }
+
+    #[inline]
+    pub fn needs_merge(&self) -> bool {
+        match self {
+            Item::Missing(_) => false,
+            Item::Existing { needs_merge, .. } => *needs_merge
+        }
+    }
+
+    #[inline]
+    pub fn age(&self) -> i64 {
+        match self {
+            Item::Missing(_) => 0,
+            Item::Existing { age, .. } => *age,
+        }
     }
 
     #[inline]
     pub fn is_folder(&self) -> bool {
-        self.kind == Kind::Folder
+        match self {
+            Item::Missing(_) => false,
+            Item::Existing { kind, .. } => kind == &Kind::Folder
+        }
     }
 
     pub fn has_compatible_kind(&self, remote_node: &Item) -> bool {
-        match (&self.kind, &remote_node.kind) {
-            // Bookmarks and queries are interchangeable, as simply changing the URL
-            // can cause it to flip kinds.
-            (Kind::Bookmark, Kind::Query) => true,
-            (Kind::Query, Kind::Bookmark) => true,
-            (local_kind, remote_kind) => local_kind == remote_kind,
+        match (self, remote_node) {
+            (Item::Missing(_), _) => false,
+            (_, Item::Missing(_)) => false,
+            (Item::Existing { kind, .. }, Item::Existing { kind: other_kind, .. }) => {
+                match (&kind, &other_kind) {
+                    // Bookmarks and queries are interchangeable, as simply changing the URL
+                    // can cause it to flip kinds.
+                    (Kind::Bookmark, Kind::Query) => true,
+                    (Kind::Query, Kind::Bookmark) => true,
+                    (local_kind, remote_kind) => local_kind == remote_kind,
+                }
+            }
         }
     }
 }
 
 impl fmt::Display for Item {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let info = if self.needs_merge {
-            format!("{}; Age = {}ms; Unmerged", self.kind, self.age)
-        } else {
-            format!("{}; Age = {}ms", self.kind, self.age)
-        };
-        write!(f, "{} ({})", self.guid, info)
+        match self {
+            Item::Missing(guid) => write!(f, "{} (Missing)", guid),
+            Item::Existing { needs_merge, guid, kind, age, .. } => {
+                let info = if *needs_merge {
+                    format!("{}; Age = {}ms; Unmerged", kind, age)
+                } else {
+                    format!("{}; Age = {}ms", kind, age)
+                };
+                write!(f, "{} ({})", guid, info)
+            }
+        }
     }
 }
 
@@ -388,26 +432,31 @@ impl<'t> MergedNode<'t> {
 
     #[cfg(test)]
     pub fn into_tree(self) -> Result<Tree> {
-        fn to_item<'t>(merged_node: &MergedNode<'t>) -> Item {
-            let node = merged_node.node();
-            let mut item = Item::new(merged_node.guid.clone(), node.kind);
-            item.age = node.age;
-            item.needs_merge = match merged_node.merge_state {
-                MergeState::Local(_)
-                | MergeState::Remote(_)
-                | MergeState::Unchanged { .. } => false,
-                _ => true,
-            };
-            item
+        fn to_item<'t>(parent_guid: Option<Guid>, merged_node: &MergedNode<'t>) -> Item {
+            match &*merged_node.node() {
+                Item::Missing(guid) => Item::Missing(guid.clone()),
+                Item::Existing { kind, age, .. } => Item::Existing {
+                    guid: merged_node.guid.clone(),
+                    parent_guid,
+                    kind: *kind,
+                    age: *age,
+                    needs_merge: match merged_node.merge_state {
+                        MergeState::Local(_)
+                        | MergeState::Remote(_)
+                        | MergeState::Unchanged { .. } => false,
+                        _ => true,
+                    },
+                },
+            }
         }
 
         fn inflate<'t>(tree: &mut Tree,
-                       parent_guid: &Guid,
-                       merged_node: MergedNode<'t>)
-                       -> Result<()>
+                    parent_guid: &Guid,
+                    merged_node: MergedNode<'t>)
+                    -> Result<()>
         {
             let guid = merged_node.guid.clone();
-            tree.insert(&parent_guid, to_item(&merged_node))?;
+            tree.insert(&parent_guid, to_item(Some(parent_guid.clone()), &merged_node))?;
             for merged_child_node in merged_node.merged_children {
                 inflate(tree, &guid, merged_child_node)?;
             }
@@ -415,7 +464,7 @@ impl<'t> MergedNode<'t> {
         }
 
         let guid = self.guid.clone();
-        let mut tree = Tree::new(to_item(&self));
+        let mut tree = Tree::new(to_item(None, &self));
         for merged_child_node in self.merged_children {
             inflate(&mut tree, &guid, merged_child_node)?;
         }
@@ -427,20 +476,23 @@ impl<'t> MergedNode<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        match self.node().kind {
-            Kind::Folder => match self.merged_children.len() {
-                0 => format!("{}📂 {}", prefix, &self),
-                _ => {
-                    let children_prefix = format!("{}| ", prefix);
-                    let children = self.merged_children
-                                       .iter()
-                                       .map(|n| n.to_ascii_fragment(&children_prefix))
-                                       .collect::<Vec<String>>()
-                                       .join("\n");
-                    format!("{}📂 {}\n{}", prefix, &self, children)
+        match &*self.node() {
+            Item::Missing(guid) => format!("{}❓ {}", prefix, guid),
+            Item::Existing { kind, ..} => match kind {
+                Kind::Folder => match self.merged_children.len() {
+                    0 => format!("{}📂 {}", prefix, &self),
+                    _ => {
+                        let children_prefix = format!("{}| ", prefix);
+                        let children = self.merged_children
+                                        .iter()
+                                        .map(|n| n.to_ascii_fragment(&children_prefix))
+                                        .collect::<Vec<String>>()
+                                        .join("\n");
+                        format!("{}📂 {}\n{}", prefix, &self, children)
+                    },
                 },
-            },
-            _ => format!("{}🔖 {}", prefix, &self),
+                _ => format!("{}🔖 {}", prefix, &self),
+            }
         }
     }
 
