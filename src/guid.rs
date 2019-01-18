@@ -120,6 +120,13 @@ impl Guid {
         }
     }
 
+    pub fn valid(&self) -> bool {
+        match self.0 {
+            Repr::Fast(_) => true,
+            Repr::Slow(_) => false,
+        }
+    }
+
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
     fn is_valid<T: Copy + IntoByte>(bytes: &[T]) -> bool {

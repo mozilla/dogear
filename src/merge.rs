@@ -64,6 +64,21 @@ enum ConflictResolution {
     Unchanged,
 }
 
+/// Controls merging behavior.
+pub trait Driver {
+    /// Generates a new GUID for the given invalid GUID.
+    fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid>;
+}
+
+/// A default implementation of the merge driver.
+struct DefaultDriver;
+
+impl Driver for DefaultDriver {
+    fn generate_new_guid(&self, _: &Guid) -> Result<Guid> {
+        Err(ErrorKind::GenerateGuid.into())
+    }
+}
+
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
 ///
@@ -86,8 +101,8 @@ enum ConflictResolution {
 /// nested hierarchies, or make conflicting changes on multiple devices
 /// simultaneously. A simpler two-way tree merge strikes a good balance between
 /// correctness and complexity.
-#[derive(Debug)]
 pub struct Merger<'t> {
+    driver: &'t Driver,
     local_tree: &'t Tree,
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
@@ -101,7 +116,8 @@ pub struct Merger<'t> {
 
 impl<'t> Merger<'t> {
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
-        Merger { local_tree,
+        Merger { driver: &DefaultDriver,
+                 local_tree,
                  new_local_contents: None,
                  remote_tree,
                  new_remote_contents: None,
@@ -118,7 +134,18 @@ impl<'t> Merger<'t> {
                          new_remote_contents: &'t HashMap<Guid, Content>)
                          -> Merger<'t>
     {
-        Merger { local_tree,
+        Merger::with_driver(&DefaultDriver, local_tree, new_local_contents, remote_tree,
+                            new_remote_contents)
+    }
+
+    pub fn with_driver(driver: &'t Driver, local_tree: &'t Tree,
+                       new_local_contents: &'t HashMap<Guid, Content>,
+                       remote_tree: &'t Tree,
+                       new_remote_contents: &'t HashMap<Guid, Content>)
+                       -> Merger<'t>
+    {
+        Merger { driver,
+                 local_tree,
                  new_local_contents: Some(new_local_contents),
                  remote_tree,
                  new_remote_contents: Some(new_remote_contents),
@@ -212,7 +239,17 @@ impl<'t> Merger<'t> {
 
         self.merged_guids.insert(local_node.guid().clone());
 
-        let mut merged_node = MergedNode::new(local_node.guid().clone(),
+        let merged_guid = if local_node.guid().valid() {
+            local_node.guid().clone()
+        } else {
+            let new_guid = self.driver.generate_new_guid(local_node.guid())?;
+            if &new_guid != local_node.guid() {
+                self.merged_guids.insert(new_guid.clone());
+            }
+            new_guid
+        };
+
+        let mut merged_node = MergedNode::new(merged_guid,
                                               MergeState::Local(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
@@ -227,13 +264,6 @@ impl<'t> Merger<'t> {
             }
         }
 
-        if local_node.diverged() {
-            // If the local node diverged, make sure we upload it. This
-            // shouldn't be possible, as we expect the local tree to be
-            // consistent, but it's easy enough to handle.
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
-        }
-
         Ok(merged_node)
     }
 
@@ -242,7 +272,19 @@ impl<'t> Merger<'t> {
 
         self.merged_guids.insert(remote_node.guid().clone());
 
-        let mut merged_node = MergedNode::new(remote_node.guid().clone(),
+        let merged_guid = if remote_node.guid().valid() {
+            remote_node.guid().clone()
+        } else {
+            let new_guid = self.driver.generate_new_guid(remote_node.guid())?;
+            if &new_guid != remote_node.guid() {
+                self.merged_guids.insert(new_guid.clone());
+                // Upload tombstones for changed remote GUIDs.
+                self.delete_remotely.insert(remote_node.guid().clone());
+            }
+            new_guid
+        };
+
+        let mut merged_node = MergedNode::new(merged_guid,
                                               MergeState::Remote(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
@@ -254,11 +296,6 @@ impl<'t> Merger<'t> {
                                                          remote_node,
                                                          remote_child_node)?;
             }
-        }
-
-        if remote_node.diverged() {
-            // Reupload diverged remote nodes.
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
         }
 
         Ok(merged_node)
@@ -337,11 +374,6 @@ impl<'t> Merger<'t> {
                                                                     local_child_node)?;
                         }
                     },
-                }
-
-                if local_node.diverged() || remote_node.diverged() {
-                    // Reupload the merged node if either side diverged.
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 }
 
                 Ok(merged_node)
@@ -437,8 +469,12 @@ impl<'t> Merger<'t> {
                         return Ok(());
                     },
                 };
-                if remote_child_node.diverged() {
-                    merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                if remote_child_node.diverged() || &merged_node.guid != remote_parent_node.guid() {
+                    // If the remote structure diverged, or the merged parent
+                    // GUID changed, flag the remote child for reupload so that
+                    // its `parentid` is correct.
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_structure();
                 }
                 merged_node.merged_children.push(merged_child_node);
                 return Ok(());
@@ -492,8 +528,11 @@ impl<'t> Merger<'t> {
                             return Ok(());
                         },
                     };
-                    if remote_child_node.diverged() {
-                        merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                    if remote_child_node.diverged() ||
+                        &merged_node.guid != remote_parent_node.guid() {
+
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_structure();
                     }
                     merged_node.merged_children.push(merged_child_node);
                 },
@@ -526,7 +565,7 @@ impl<'t> Merger<'t> {
                 }?
             },
         };
-        if remote_child_node.diverged() {
+        if remote_child_node.diverged() || &merged_node.guid != remote_parent_node.guid() {
             merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
         }
         merged_node.merged_children.push(merged_child_node);
@@ -689,8 +728,13 @@ impl<'t> Merger<'t> {
                             },
                         };
                         merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        if local_child_node.diverged() {
-                            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                        if remote_child_node.diverged() ||
+                            &merged_node.guid != remote_parent_node.guid() {
+
+                            // ...But repositioning an item in a diverged folder, or in a folder
+                            // with an invalid GUID, should reupload the item.
+                            merged_child_node.merge_state =
+                                merged_child_node.merge_state.with_new_structure();
                         }
                         merged_node.merged_children.push(merged_child_node);
                     }
@@ -725,7 +769,7 @@ impl<'t> Merger<'t> {
         trace!("Local child {} doesn't exist remotely; looking for remote content match",
                local_child_node);
 
-        let mut merged_child_node = match &*local_child_node {
+        let merged_child_node = match &*local_child_node {
             Item::Missing(_) => return Ok(()),
             Item::Existing { .. } => {
                 if let Some(remote_child_node_by_content) =
@@ -736,7 +780,15 @@ impl<'t> Merger<'t> {
                 {
                     // The local child has a remote content match, so take the remote GUID
                     // and merge.
-                    self.two_way_merge(local_child_node, remote_child_node_by_content)?
+                    let mut merged_child_node = self.two_way_merge(local_child_node, remote_child_node_by_content)?;
+                    if remote_child_node_by_content.diverged() ||
+                        remote_parent_node.map(|node| &merged_node.guid != node.guid()).unwrap_or(false) {
+
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_structure();
+                    }
+                    merged_child_node
                 } else {
                     // The local child doesn't exist remotely, so flag the merged parent and
                     // new child for upload, and walk its descendants.
@@ -747,9 +799,6 @@ impl<'t> Merger<'t> {
                 }
             },
         };
-        if local_child_node.diverged() {
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
-        }
         merged_node.merged_children.push(merged_child_node);
         Ok(())
     }

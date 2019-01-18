@@ -18,7 +18,7 @@ use std::{collections::HashMap, sync::Once};
 
 use error::{ErrorKind, Result};
 use guid::{Guid, ROOT_GUID, UNFILED_GUID};
-use merge::{Merger, StructureCounts};
+use merge::{Driver, Merger, StructureCounts};
 use tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
 #[derive(Debug)]
@@ -1840,6 +1840,14 @@ fn mismatched_incompatible_bookmark_kinds() {
 fn invalid_guids() {
     before_each();
 
+    struct AllowInvalidGuids;
+
+    impl Driver for AllowInvalidGuids {
+        fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
+            Ok(invalid_guid.clone())
+        }
+    }
+
     let local_tree = nodes!({
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5]),
@@ -1850,6 +1858,7 @@ fn invalid_guids() {
             ("loooooongGUID", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
+    let new_local_contents: HashMap<Guid, Content> = HashMap::new();
 
     let remote_tree = nodes!({
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
@@ -1863,8 +1872,13 @@ fn invalid_guids() {
             ("bookmarkBBBB", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
+    let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
-    let mut merger = Merger::new(&local_tree, &remote_tree);
+    let mut merger = Merger::with_driver(&AllowInvalidGuids,
+                                         &local_tree,
+                                         &new_local_contents,
+                                         &remote_tree,
+                                         &new_remote_contents);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
