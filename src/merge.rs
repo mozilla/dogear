@@ -226,6 +226,14 @@ impl<'t> Merger<'t> {
                                                         local_child_node)?;
             }
         }
+
+        if local_node.diverged() {
+            // If the local node diverged, make sure we upload it. This
+            // shouldn't be possible, as we expect the local tree to be
+            // consistent, but it's easy enough to handle.
+            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+        }
+
         Ok(merged_node)
     }
 
@@ -247,6 +255,12 @@ impl<'t> Merger<'t> {
                                                          remote_child_node)?;
             }
         }
+
+        if remote_node.diverged() {
+            // Reupload diverged remote nodes.
+            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+        }
+
         Ok(merged_node)
     }
 
@@ -325,6 +339,11 @@ impl<'t> Merger<'t> {
                     },
                 }
 
+                if local_node.diverged() || remote_node.diverged() {
+                    // Reupload the merged node if either side diverged.
+                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                }
+
                 Ok(merged_node)
             }
         }
@@ -384,7 +403,7 @@ impl<'t> Merger<'t> {
 
         // The remote child isn't locally deleted. Does it exist in the local tree?
         if let Some(local_child_node) = self.local_tree.node_for_guid(&remote_child_node.guid()) {
-            // Otherwise, the remote child exists in the local tree. Did it move?
+            // The remote child exists in the local tree. Did it move?
             let local_parent_node =
                 local_child_node.parent()
                                 .expect("Can't merge existing remote child without local parent");
@@ -401,7 +420,7 @@ impl<'t> Merger<'t> {
                        remote_parent_node,
                        local_parent_node);
 
-                let merged_child_node = match (&*local_child_node, &*remote_child_node) {
+                let mut merged_child_node = match (&*local_child_node, &*remote_child_node) {
                     (Item::Missing(_), Item::Existing { .. }) => {
                         self.merge_remote_node(remote_child_node)?
                     },
@@ -418,8 +437,10 @@ impl<'t> Merger<'t> {
                         return Ok(());
                     },
                 };
+                if remote_child_node.diverged() {
+                    merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                }
                 merged_node.merged_children.push(merged_child_node);
-
                 return Ok(());
             }
 
@@ -454,7 +475,7 @@ impl<'t> Merger<'t> {
                            local_parent_node,
                            remote_parent_node);
 
-                    let merged_child_node = match (&*local_child_node, &*remote_child_node) {
+                    let mut merged_child_node = match (&*local_child_node, &*remote_child_node) {
                         (Item::Missing(_), Item::Existing { .. }) => {
                             self.merge_remote_node(remote_child_node)?
                         },
@@ -471,6 +492,9 @@ impl<'t> Merger<'t> {
                             return Ok(());
                         },
                     };
+                    if remote_child_node.diverged() {
+                        merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                    }
                     merged_node.merged_children.push(merged_child_node);
                 },
             }
@@ -484,7 +508,7 @@ impl<'t> Merger<'t> {
         trace!("Remote child {} doesn't exist locally; looking for local content match",
                remote_child_node);
 
-        let merged_child_node = match &*remote_child_node {
+        let mut merged_child_node = match &*remote_child_node {
             Item::Missing(_) => {
                 merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 return Ok(());
@@ -502,6 +526,9 @@ impl<'t> Merger<'t> {
                 }?
             },
         };
+        if remote_child_node.diverged() {
+            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+        }
         merged_node.merged_children.push(merged_child_node);
         Ok(())
     }
@@ -643,7 +670,7 @@ impl<'t> Merger<'t> {
                         // merge and flag the parent for reupload. If the
                         // repositioned item is an orphan, we need to flag it,
                         // too.
-                        let merged_child_node = match (&*local_child_node, &*remote_child_node) {
+                        let mut merged_child_node = match (&*local_child_node, &*remote_child_node) {
                             (Item::Missing(_), Item::Existing { .. }) => {
                                 self.merge_remote_node(remote_child_node)?
                             },
@@ -662,6 +689,9 @@ impl<'t> Merger<'t> {
                             },
                         };
                         merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        if local_child_node.diverged() {
+                            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                        }
                         merged_node.merged_children.push(merged_child_node);
                     }
                 },
@@ -695,7 +725,7 @@ impl<'t> Merger<'t> {
         trace!("Local child {} doesn't exist remotely; looking for remote content match",
                local_child_node);
 
-        let merged_child_node = match &*local_child_node {
+        let mut merged_child_node = match &*local_child_node {
             Item::Missing(_) => return Ok(()),
             Item::Existing { .. } => {
                 if let Some(remote_child_node_by_content) =
@@ -717,6 +747,9 @@ impl<'t> Merger<'t> {
                 }
             },
         };
+        if local_child_node.diverged() {
+            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+        }
         merged_node.merged_children.push(merged_child_node);
         Ok(())
     }
@@ -734,23 +767,35 @@ impl<'t> Merger<'t> {
         }
 
         match (local_node.needs_merge(), remote_node.needs_merge()) {
-            (true, true) => {
-                // The item changed locally and remotely.
-                if local_node.age() < remote_node.age() {
-                    // The local change is newer, so merge local children first,
-                    // followed by remaining unmerged remote children.
-                    (ConflictResolution::Local, ConflictResolution::Local)
-                } else {
-                    // The remote change is newer, so walk and merge remote
-                    // children first, then remaining local children.
-                    if USER_CONTENT_ROOTS.contains(&remote_node.guid()) {
-                        // Don't update root titles or other properties, but
-                        // use their newer remote structure.
-                        (ConflictResolution::Local, ConflictResolution::Remote)
+            (true, true) => match (local_node.diverged(), remote_node.diverged()) {
+                (true, false) => (ConflictResolution::Remote, ConflictResolution::Remote),
+                (false, true) => (ConflictResolution::Local, ConflictResolution::Local),
+                _ => {
+                    // The item changed locally and remotely.
+                    if local_node.age() < remote_node.age() {
+                        // The local change is newer, so merge local children first,
+                        // followed by remaining unmerged remote children.
+                        (ConflictResolution::Local, ConflictResolution::Local)
                     } else {
-                        (ConflictResolution::Remote, ConflictResolution::Remote)
+                        // The remote change is newer, so walk and merge remote
+                        // children first, then remaining local children.
+                        if USER_CONTENT_ROOTS.contains(&remote_node.guid()) {
+                            // Don't update root titles or other properties, but
+                            // use their newer remote structure.
+                            (ConflictResolution::Local, ConflictResolution::Remote)
+                        } else {
+                            // The remote change is newer, so walk and merge remote
+                            // children first, then remaining local children.
+                            if USER_CONTENT_ROOTS.contains(&remote_node.guid()) {
+                                // Don't update root titles or other properties, but
+                                // use their newer remote structure.
+                                (ConflictResolution::Local, ConflictResolution::Remote)
+                            } else {
+                                (ConflictResolution::Remote, ConflictResolution::Remote)
+                            }
+                        }
                     }
-                }
+                },
             },
 
             (true, false) => {
@@ -792,17 +837,21 @@ impl<'t> Merger<'t> {
         }
 
         match (local_parent_node.needs_merge(), remote_parent_node.needs_merge()) {
-            (true, true) => {
-                // If both parents changed, compare timestamps to decide where
-                // to keep the local child.
-                let latest_local_age = local_child_node.age().min(local_parent_node.age());
-                let latest_remote_age = remote_child_node.age().min(remote_parent_node.age());
+            (true, true) => match (local_parent_node.diverged(), remote_parent_node.diverged()) {
+                (true, false) => ConflictResolution::Remote,
+                (false, true) => ConflictResolution::Local,
+                _ => {
+                    // If both parents changed, compare timestamps to decide where
+                    // to keep the local child.
+                    let latest_local_age = local_child_node.age().min(local_parent_node.age());
+                    let latest_remote_age = remote_child_node.age().min(remote_parent_node.age());
 
-                if latest_local_age < latest_remote_age {
-                    ConflictResolution::Local
-                } else {
-                    ConflictResolution::Remote
-                }
+                    if latest_local_age < latest_remote_age {
+                        ConflictResolution::Local
+                    } else {
+                        ConflictResolution::Remote
+                    }
+                },
             },
 
             (true, false) => {

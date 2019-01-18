@@ -17,7 +17,7 @@ extern crate env_logger;
 use std::{collections::HashMap, sync::Once};
 
 use error::{ErrorKind, Result};
-use guid::{Guid, ROOT_GUID};
+use guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use merge::{Merger, StructureCounts};
 use tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
@@ -58,7 +58,7 @@ impl Node {
             age: self.info.age,
             needs_merge: self.info.needs_merge,
         };
-        let mut tree = Tree::new(item);
+        let mut tree = Tree::with_reparenting(item, &UNFILED_GUID);
         for child in self.children {
             inflate(&mut tree, &self.info.guid, *child)?;
         }
@@ -1879,6 +1879,128 @@ fn invalid_guids() {
             ("bookmarkBBBB", Bookmark),
             ("shortGUID", Bookmark[needs_merge = true]),
             ("loooooongGUID", Bookmark[needs_merge = true])
+        })
+    }).into_tree().unwrap();
+    let expected_telem = StructureCounts::default();
+
+    let merged_tree = merged_root.into_tree().unwrap();
+    assert_eq!(merged_tree, expected_tree);
+
+    assert_eq!(merger.deletions().count(), 0);
+
+    assert_eq!(merger.telemetry(), &expected_telem);
+}
+
+#[test]
+fn multiple_parents() {
+    before_each();
+
+    let local_tree = Tree::default();
+
+    let remote_tree = nodes!({
+        ("toolbar_____", Folder[age = 5], {
+            ("bookmarkAAAA", Bookmark),
+            ("bookmarkBBBB", Bookmark),
+            ("folderCCCCCC", Folder, {
+                ("bookmarkDDDD", Bookmark),
+                ("bookmarkEEEE", Bookmark),
+                ("bookmarkFFFF", Bookmark)
+            })
+        }),
+        ("menu________", Folder, {
+            ("bookmarkGGGG", Bookmark),
+            ("bookmarkAAAA", Bookmark),
+            ("folderCCCCCC", Folder, {
+                ("bookmarkHHHH", Bookmark),
+                ("bookmarkDDDD", Bookmark)
+            })
+        })
+    }).into_tree().unwrap();
+
+    let mut merger = Merger::new(&local_tree, &remote_tree);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = nodes!(ROOT_GUID, Folder, {
+        ("toolbar_____", Folder[age = 5, needs_merge = true], {
+            ("bookmarkBBBB", Bookmark)
+        }),
+        ("menu________", Folder[needs_merge = true], {
+            ("bookmarkGGGG", Bookmark),
+            ("bookmarkAAAA", Bookmark[needs_merge = true]),
+            ("folderCCCCCC", Folder[needs_merge = true], {
+                ("bookmarkDDDD", Bookmark[needs_merge = true]),
+                ("bookmarkEEEE", Bookmark),
+                ("bookmarkFFFF", Bookmark),
+                ("bookmarkHHHH", Bookmark)
+            })
+        })
+    }).into_tree().unwrap();
+    let expected_telem = StructureCounts::default();
+
+    let merged_tree = merged_root.into_tree().unwrap();
+    assert_eq!(merged_tree, expected_tree);
+
+    assert_eq!(merger.deletions().count(), 0);
+
+    assert_eq!(merger.telemetry(), &expected_telem);
+}
+
+#[test]
+fn reparent_orphans() {
+    before_each();
+
+    let local_tree = nodes!({
+        ("toolbar_____", Folder, {
+            ("bookmarkAAAA", Bookmark),
+            ("bookmarkBBBB", Bookmark)
+        }),
+        ("unfiled_____", Folder, {
+            ("bookmarkCCCC", Bookmark)
+        })
+    }).into_tree().unwrap();
+
+    let mut remote_tree = nodes!({
+        ("toolbar_____", Folder[needs_merge = true], {
+            ("bookmarkBBBB", Bookmark),
+            ("bookmarkAAAA", Bookmark)
+        }),
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkDDDD", Bookmark[needs_merge = true]),
+            ("bookmarkCCCC", Bookmark)
+        })
+    }).into_tree().unwrap();
+    remote_tree.insert(ParentGuidFrom::default().item(&"toolbar_____".into()), Item::Existing {
+        guid: "bookmarkEEEE".into(),
+        parent_guid: None,
+        kind: Kind::Bookmark,
+        age: 0,
+        needs_merge: true,
+    }).expect("Should insert orphan E");
+    remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item::Existing {
+        guid: "bookmarkFFFF".into(),
+        parent_guid: None,
+        kind: Kind::Bookmark,
+        age: 0,
+        needs_merge: true,
+    }).expect("Should insert orphan F");
+
+    let mut merger = Merger::new(&local_tree, &remote_tree);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = nodes!({
+        ("toolbar_____", Folder[needs_merge = true], {
+            ("bookmarkBBBB", Bookmark),
+            ("bookmarkAAAA", Bookmark),
+            ("bookmarkEEEE", Bookmark[needs_merge = true])
+        }),
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkDDDD", Bookmark),
+            ("bookmarkCCCC", Bookmark),
+            ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
     let expected_telem = StructureCounts::default();
