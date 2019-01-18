@@ -19,7 +19,7 @@ use std::{collections::HashMap, sync::Once};
 use error::{ErrorKind, Result};
 use guid::{Guid, ROOT_GUID};
 use merge::{Merger, StructureCounts};
-use tree::{Content, Item, Kind, Tree};
+use tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
 #[derive(Debug)]
 struct Node {
@@ -41,7 +41,10 @@ impl Node {
                 age: node.info.age,
                 needs_merge: node.info.needs_merge,
             };
-            tree.insert(&parent_guid, item)?;
+            tree.insert(ParentGuidFrom::default()
+                            .children(&parent_guid)
+                            .item(&parent_guid),
+                        item)?;
             for child in node.children {
                 inflate(tree, &node.info.guid, *child)?;
             }

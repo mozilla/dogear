@@ -30,12 +30,15 @@ enum Repr {
 /// The Places root GUID, used to root all items in a bookmark tree.
 pub const ROOT_GUID: Guid = Guid(Repr::Fast(*b"root________"));
 
+/// The "Other Bookmarks" GUID, used to hold items without a parent.
+pub const UNFILED_GUID: Guid = Guid(Repr::Fast(*b"unfiled_____"));
+
 /// The syncable Places roots. All synced items should descend from these
 /// roots.
 pub const USER_CONTENT_ROOTS: [Guid; 4] = [
     Guid(Repr::Fast(*b"toolbar_____")),
     Guid(Repr::Fast(*b"menu________")),
-    Guid(Repr::Fast(*b"unfiled_____")),
+    UNFILED_GUID,
     Guid(Repr::Fast(*b"mobile______")),
 ];
 
