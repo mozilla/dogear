@@ -496,87 +496,7 @@ impl fmt::Display for Tree {
 #[cfg(test)]
 impl PartialEq for Tree {
     fn eq(&self, other: &Tree) -> bool {
-        if self.entries.len() != other.entries.len() {
-            return false;
-        }
-        if !self.orphan_indices_by_parent_guid.is_empty() ||
-            !other.orphan_indices_by_parent_guid.is_empty() {
-
-            return false;
-        }
-        for entry in self.entries.iter() {
-            let other_index = match other.entry_index_by_guid.get(entry.item.guid()) {
-                Some(&other_index) => other_index,
-                None => return false,
-            };
-            let other_entry = &other.entries[other_index];
-            if entry.item != other_entry.item {
-                return false;
-            }
-            let parents_match = match (&entry.parents, &other_entry.parents) {
-                (EntryParents::Root, EntryParents::Root) => true,
-                (EntryParents::One(parent), EntryParents::One(other_parent)) => {
-                    match (parent, other_parent) {
-                        (EntryParentFrom::Children(parent_index),
-                            EntryParentFrom::Children(other_parent_index)) => {
-
-                            let parent_entry = &self.entries[*parent_index];
-                            let other_parent_entry = &self.entries[*other_parent_index];
-                            parent_entry.item.guid() == other_parent_entry.item.guid()
-                        },
-                        (EntryParentFrom::Item(guid),
-                            EntryParentFrom::Item(other_guid)) => guid == other_guid,
-                        _ => false,
-                    }
-                },
-                (EntryParents::Many(parents), EntryParents::Many(other_parents)) => {
-                    if parents.len() == other_parents.len() {
-                        parents.iter()
-                            .zip(other_parents.iter())
-                            .all(|(parent, other_parent)| {
-                                match (parent, other_parent) {
-                                    (EntryParentFrom::Children(parent_index),
-                                        EntryParentFrom::Children(other_parent_index)) => {
-
-                                        let parent_entry = &self.entries[*parent_index];
-                                        let other_parent_entry = &self.entries[*other_parent_index];
-                                        parent_entry.item.guid() == other_parent_entry.item.guid()
-                                    },
-                                    (EntryParentFrom::Item(guid),
-                                        EntryParentFrom::Item(other_guid)) => guid == other_guid,
-                                    _ => false,
-                                }
-                            })
-                    } else {
-                        false
-                    }
-                },
-                _ => false,
-            };
-            if !parents_match {
-                return false;
-            }
-            let children_match = if entry.child_indices.len() == other_entry.child_indices.len() {
-                entry.child_indices.iter()
-                    .zip(other_entry.child_indices.iter())
-                    .all(|(&child_index, &other_child_index)| {
-                        let child_entry = &self.entries[child_index];
-                        let other_child_entry = &self.entries[other_child_index];
-                        child_entry.item.guid() == other_child_entry.item.guid()
-                    })
-            } else {
-                false
-            };
-            if !children_match {
-                return false;
-            }
-        }
-        for other_entry in other.entries.iter() {
-            if !self.entry_index_by_guid.contains_key(other_entry.item.guid()) {
-                return false;
-            }
-        }
-        true
+        &self.root() == &other.root()
     }
 }
 
@@ -922,6 +842,25 @@ impl<'t> Deref for Node<'t> {
 impl<'t> fmt::Display for Node<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.entry().item.fmt(f)
+    }
+}
+
+#[cfg(test)]
+impl<'t> PartialEq for Node<'t> {
+    fn eq(&self, other: &Node) -> bool {
+        match (self.parent(), other.parent()) {
+            (Some(parent), Some(other_parent)) => {
+                if parent.entry().item != other_parent.entry().item {
+                    return false;
+                }
+            },
+            (Some(_), None) | (None, Some(_)) => return false,
+            (None, None) => {}
+        }
+        if self.entry().item != other.entry().item {
+            return false;
+        }
+        self.children().eq(other.children())
     }
 }
 
