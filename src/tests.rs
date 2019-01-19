@@ -44,7 +44,7 @@ impl Node {
             tree.insert(ParentGuidFrom::default()
                             .children(&parent_guid)
                             .item(&parent_guid),
-                        item)?;
+                        item.into())?;
             for child in node.children {
                 inflate(tree, &node.info.guid, *child)?;
             }
@@ -1991,14 +1991,14 @@ fn reparent_orphans() {
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
-    }).expect("Should insert orphan E");
+    }.into()).expect("Should insert orphan E");
     remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item::Existing {
         guid: "bookmarkFFFF".into(),
         parent_guid: None,
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
-    }).expect("Should insert orphan F");
+    }.into()).expect("Should insert orphan F");
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
