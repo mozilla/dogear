@@ -23,63 +23,34 @@ use tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
 #[derive(Debug)]
 struct Node {
-    info: Info,
+    item: Item,
     children: Vec<Box<Node>>,
 }
 
 impl Node {
-    fn new(info: Info) -> Node {
-        Node { info, children: Vec::new() }
+    fn new(item: Item) -> Node {
+        Node { item, children: Vec::new() }
     }
 
     fn into_tree(self) -> Result<Tree> {
         fn inflate(tree: &mut Tree, parent_guid: &Guid, node: Node) -> Result<()> {
-            let item = Item::Existing {
-                guid: node.info.guid.clone(),
-                parent_guid: Some(parent_guid.clone()),
-                kind: node.info.kind,
-                age: node.info.age,
-                needs_merge: node.info.needs_merge,
-            };
+            let guid = node.item.guid.clone();
             tree.insert(ParentGuidFrom::default()
                             .children(&parent_guid)
                             .item(&parent_guid),
-                        item.into())?;
+                        node.item.into())?;
             for child in node.children {
-                inflate(tree, &node.info.guid, *child)?;
+                inflate(tree, &guid, *child)?;
             }
             Ok(())
         }
 
-        let item = Item::Existing {
-            guid: self.info.guid.clone(),
-            parent_guid: None,
-            kind: self.info.kind,
-            age: self.info.age,
-            needs_merge: self.info.needs_merge,
-        };
-        let mut tree = Tree::with_reparenting(item, &UNFILED_GUID);
+        let guid = self.item.guid.clone();
+        let mut tree = Tree::with_reparenting(self.item, &UNFILED_GUID);
         for child in self.children {
-            inflate(&mut tree, &self.info.guid, *child)?;
+            inflate(&mut tree, &guid, *child)?;
         }
         Ok(tree)
-    }
-}
-
-#[derive(Debug)]
-struct Info {
-    guid: Guid,
-    kind: Kind,
-    age: i64,
-    needs_merge: bool,
-}
-
-impl Info {
-    pub fn new(guid: Guid, kind: Kind) -> Info {
-        Info { guid,
-               kind,
-               age: 0,
-               needs_merge: false, }
     }
 }
 
@@ -87,9 +58,9 @@ macro_rules! nodes {
     ($children:tt) => { nodes!(ROOT_GUID, Folder[needs_merge = true], $children) };
     ($guid:expr, $kind:ident) => { nodes!(Guid::from($guid), $kind[]) };
     ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
-        let mut info = Info::new(Guid::from($guid), Kind::$kind);
-        $({ info.$name = $value; })*
-        Node::new(info)
+        let mut item = Item::new(Guid::from($guid), Kind::$kind);
+        $({ item.$name = $value; })*
+        Node::new(item)
     }};
     ($guid:expr, $kind:ident, $children:tt) => { nodes!($guid, $kind[], $children) };
     ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ], { $(( $($children:tt)+ )),* }) => {{
@@ -1985,16 +1956,14 @@ fn reparent_orphans() {
             ("bookmarkCCCC", Bookmark)
         })
     }).into_tree().unwrap();
-    remote_tree.insert(ParentGuidFrom::default().item(&"toolbar_____".into()), Item::Existing {
+    remote_tree.insert(ParentGuidFrom::default().item(&"toolbar_____".into()), Item {
         guid: "bookmarkEEEE".into(),
-        parent_guid: None,
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
     }.into()).expect("Should insert orphan E");
-    remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item::Existing {
+    remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item {
         guid: "bookmarkFFFF".into(),
-        parent_guid: None,
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
