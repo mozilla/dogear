@@ -203,7 +203,7 @@ impl<'t> Merger<'t> {
             } else {
                 let local_level = self.local_tree
                                       .node_for_guid(guid)
-                                      .and_then(|node| node.level())
+                                      .map(|node| node.level())
                                       .unwrap_or(-1);
                 // Items that should be deleted locally already have tombstones
                 // on the server, so we don't need to upload tombstones for
@@ -219,7 +219,7 @@ impl<'t> Merger<'t> {
         self.delete_remotely.iter().map(move |guid| {
             let local_level = self.local_tree
                                   .node_for_guid(guid)
-                                  .and_then(|node| node.level())
+                                  .map(|node| node.level())
                                   .unwrap_or(-1);
             Deletion { guid: guid.to_owned(),
                        local_level,
