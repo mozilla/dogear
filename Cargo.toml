@@ -11,6 +11,4 @@ exclude = [".travis", ".travis.yml"]
 log = "0.4"
 
 [dev-dependencies]
-base64 = "0.10"
 env_logger = "0.5.6"
-rand = "0.6"
