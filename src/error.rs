@@ -52,7 +52,7 @@ pub enum ErrorKind {
     MergeConflict,
     UnmergedLocalItems,
     UnmergedRemoteItems,
-    GenerateGuid,
+    GenerateGuid(Guid),
 }
 
 impl fmt::Display for ErrorKind {
@@ -85,8 +85,8 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnmergedRemoteItems => {
                 write!(f, "Merged tree doesn't mention all items from remote tree")
             },
-            ErrorKind::GenerateGuid => {
-                write!(f, "Failed to generate GUID")
+            ErrorKind::GenerateGuid(invalid_guid) => {
+                write!(f, "Failed to generate new GUID for {}", invalid_guid)
             }
         }
     }

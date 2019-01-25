@@ -64,18 +64,33 @@ enum ConflictResolution {
     Unchanged,
 }
 
-/// Controls merging behavior.
+/// A merge driver provides methods to customize merging behavior.
 pub trait Driver {
-    /// Generates a new GUID for the given invalid GUID.
+    /// Generates a new GUID for the given invalid GUID. This is used to fix up
+    /// items with GUIDs that Places can't store (bug 1380606, bug 1313026).
+    ///
+    /// Implementations of `Driver` can either use the `rand` and `base64`
+    /// crates to generate a new, random GUID (9 bytes, Base64url-encoded
+    /// without padding), or use an existing method like Desktop's
+    /// `nsINavHistoryService::MakeGuid`. Dogear doesn't generate new GUIDs
+    /// automatically to avoid depending on those crates.
+    ///
+    /// An implementation can also return:
+    ///
+    /// - `Ok(invalid_guid.clone())` to pass through all invalid GUIDs, as the
+    ///   tests do.
+    /// - An error to forbid them entirely, as `DefaultDriver` does.
     fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid>;
 }
 
 /// A default implementation of the merge driver.
-struct DefaultDriver;
+pub struct DefaultDriver;
 
 impl Driver for DefaultDriver {
-    fn generate_new_guid(&self, _: &Guid) -> Result<Guid> {
-        Err(ErrorKind::GenerateGuid.into())
+    /// The default implementation returns an error and fails the merge if any
+    /// items have invalid GUIDs.
+    fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
+        Err(ErrorKind::GenerateGuid(invalid_guid.clone()).into())
     }
 }
 
@@ -101,8 +116,8 @@ impl Driver for DefaultDriver {
 /// nested hierarchies, or make conflicting changes on multiple devices
 /// simultaneously. A simpler two-way tree merge strikes a good balance between
 /// correctness and complexity.
-pub struct Merger<'t> {
-    driver: &'t Driver,
+pub struct Merger<'t, D = DefaultDriver> {
+    driver: D,
     local_tree: &'t Tree,
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
@@ -114,9 +129,9 @@ pub struct Merger<'t> {
     structure_counts: StructureCounts,
 }
 
-impl<'t> Merger<'t> {
+impl<'t> Merger<'t, DefaultDriver> {
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
-        Merger { driver: &DefaultDriver,
+        Merger { driver: DefaultDriver,
                  local_tree,
                  new_local_contents: None,
                  remote_tree,
@@ -134,15 +149,17 @@ impl<'t> Merger<'t> {
                          new_remote_contents: &'t HashMap<Guid, Content>)
                          -> Merger<'t>
     {
-        Merger::with_driver(&DefaultDriver, local_tree, new_local_contents, remote_tree,
+        Merger::with_driver(DefaultDriver, local_tree, new_local_contents, remote_tree,
                             new_remote_contents)
     }
+}
 
-    pub fn with_driver(driver: &'t Driver, local_tree: &'t Tree,
+impl <'t, D: Driver> Merger<'t, D> {
+    pub fn with_driver(driver: D, local_tree: &'t Tree,
                        new_local_contents: &'t HashMap<Guid, Content>,
                        remote_tree: &'t Tree,
                        new_remote_contents: &'t HashMap<Guid, Content>)
-                       -> Merger<'t>
+                       -> Merger<'t, D>
     {
         Merger { driver,
                  local_tree,
@@ -448,7 +465,7 @@ impl<'t> Merger<'t> {
 
                 let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
-                if remote_child_node.diverged() || merged_node.guid != remote_parent_node.guid {
+                if remote_child_node.diverged() || merged_node.remote_guid_changed() {
                     // If the remote structure diverged, or the merged parent
                     // GUID changed, flag the remote child for reupload so that
                     // its `parentid` is correct.
@@ -492,7 +509,7 @@ impl<'t> Merger<'t> {
 
                     let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                    remote_child_node)?;
-                    if remote_child_node.diverged() || merged_node.guid != remote_parent_node.guid {
+                    if remote_child_node.diverged() || merged_node.remote_guid_changed() {
                         merged_child_node.merge_state =
                             merged_child_node.merge_state.with_new_structure();
                     }
@@ -519,7 +536,7 @@ impl<'t> Merger<'t> {
         } else {
             self.merge_remote_node(remote_child_node)
         }?;
-        if remote_child_node.diverged() || merged_node.guid != remote_parent_node.guid {
+        if remote_child_node.diverged() || merged_node.remote_guid_changed() {
             merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
         }
         merged_node.merged_children.push(merged_child_node);
@@ -637,9 +654,7 @@ impl<'t> Merger<'t> {
                         let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                        remote_child_node)?;
                         merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        if remote_child_node.diverged() ||
-                            merged_node.guid != remote_parent_node.guid {
-
+                        if remote_child_node.diverged() || merged_node.remote_guid_changed() {
                             // ...But repositioning an item in a diverged folder, or in a folder
                             // with an invalid GUID, should reupload the item.
                             merged_child_node.merge_state =
@@ -688,9 +703,7 @@ impl<'t> Merger<'t> {
             // and merge.
             let mut merged_child_node = self.two_way_merge(local_child_node,
                                                            remote_child_node_by_content)?;
-            if remote_child_node_by_content.diverged() ||
-                remote_parent_node.map(|node| merged_node.guid != node.guid).unwrap_or(false) {
-
+            if remote_child_node_by_content.diverged() || merged_node.remote_guid_changed() {
                 merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 merged_child_node.merge_state =
                     merged_child_node.merge_state.with_new_structure();

@@ -38,12 +38,12 @@ impl Default for ParentGuidFrom {
 impl ParentGuidFrom {
     /// Notes that the parent `guid` comes from an item's parent's `children`.
     pub fn children(self, guid: &Guid) -> ParentGuidFrom {
-        ParentGuidFrom(Some(guid.to_owned()), self.1)
+        ParentGuidFrom(Some(guid.clone()), self.1)
     }
 
     /// Notes that the parent `guid` comes from an item's `parentid`.
     pub fn item(self, guid: &Guid) -> ParentGuidFrom {
-        ParentGuidFrom(self.0, Some(guid.to_owned()))
+        ParentGuidFrom(self.0, Some(guid.clone()))
     }
 }
 
@@ -213,7 +213,7 @@ impl Tree {
             entry_index_by_guid,
             deleted_guids: HashSet::new(),
             orphan_indices_by_parent_guid: HashMap::new(),
-            reparent_orphans_to: Some(reparent_orphans_to.to_owned()),
+            reparent_orphans_to: Some(reparent_orphans_to.clone()),
         }
     }
 
@@ -251,7 +251,7 @@ impl Tree {
                 // Check if this node has reparented orphans (rule 2).
                 return Node(self, entry, Divergence::Diverged);
             }
-            if entry.is(&self.entries[self.reparent_orphans_to_default_index()]) {
+            if std::ptr::eq(entry, &self.entries[self.reparent_orphans_to_default_index()]) {
                 // If this node is the default folder for reparented orphans,
                 // check if we have any remaining orphans that reference
                 // nonexistent or non-folder parents (rule 3).
@@ -344,7 +344,7 @@ impl Tree {
                             child_indices.push(entry_index);
                         }
 
-                        self.entry_index_by_guid.insert(item.guid.to_owned(), entry_index);
+                        self.entry_index_by_guid.insert(item.guid.clone(), entry_index);
                         self.entries.insert(entry_index, Entry {
                             item,
                             divergence,
@@ -374,7 +374,7 @@ impl Tree {
                 if let EntryParents::Root = &entry.parents {
                     // Don't allow duplicate roots. `Tree::insert` panics if
                     // roots diverge.
-                    return Err(ErrorKind::DuplicateItem(child.guid().to_owned()).into());
+                    return Err(ErrorKind::DuplicateItem(child.guid().clone()).into());
                 }
                 Ok(EntryIndex::Existing(entry_index))
             },
@@ -395,7 +395,7 @@ impl Tree {
                     EntryParentFrom::Item(parent_guid)
                 }).unwrap_or_else(|| {
                     match &self.reparent_orphans_to {
-                        Some(parent_guid) => EntryParentFrom::Item(parent_guid.to_owned()),
+                        Some(parent_guid) => EntryParentFrom::Item(parent_guid.clone()),
                         None => EntryParentFrom::Children(0),
                     }
                 });
@@ -407,13 +407,13 @@ impl Tree {
             ParentGuidFrom(Some(from_children), from_item) => {
                 let parent_index = match self.entry_index_by_guid.get(&from_children) {
                     Some(parent_index) => *parent_index,
-                    None => return Err(ErrorKind::MissingParent(child.guid().to_owned(),
-                                                                from_children.to_owned()).into()),
+                    None => return Err(ErrorKind::MissingParent(child.guid().clone(),
+                                                                from_children.clone()).into()),
                 };
                 let parent_entry = &self.entries[parent_index];
                 if !parent_entry.item.is_folder() {
-                    return Err(ErrorKind::InvalidParent(child.guid().to_owned(),
-                                                        parent_entry.item.guid.to_owned()).into());
+                    return Err(ErrorKind::InvalidParent(child.guid().clone(),
+                                                        parent_entry.item.guid.clone()).into());
                 }
                 from_item.map(|from_item| {
                     if from_item == from_children {
@@ -535,10 +535,6 @@ impl Entry {
             child_indices: Vec::new(),
         }
     }
-
-    fn is(&self, other: &Entry) -> bool {
-        self as *const _ == other as *const _
-    }
 }
 
 /// Stores structure state for an entry.
@@ -603,12 +599,12 @@ impl EntryParents {
             EntryParents::Root => Vec::new(),
             EntryParents::One(parent_from) => match parent_from {
                 EntryParentFrom::Children(_) => Vec::new(),
-                EntryParentFrom::Item(guid) => vec![guid.to_owned()],
+                EntryParentFrom::Item(guid) => vec![guid.clone()],
             },
             EntryParents::Many(parents_from) => {
                 parents_from.iter().filter_map(|parent_from| match parent_from {
                     EntryParentFrom::Children(_) => None,
-                    EntryParentFrom::Item(guid) => Some(guid.to_owned()),
+                    EntryParentFrom::Item(guid) => Some(guid.clone()),
                 }).collect()
             }
         }
@@ -680,7 +676,7 @@ impl<'t> Node<'t> {
                 let child_node = Node(self.tree(), child_entry, child_entry.divergence);
                 match child_node.parent() {
                     // Filter out children that resolve to other parents.
-                    Some(parent_node) if parent_node.entry().is(self.entry()) => Some(child_node),
+                    Some(parent_node) if std::ptr::eq(parent_node.entry(), self.entry()) => Some(child_node),
                     _ => None,
                 }
             })
@@ -806,7 +802,7 @@ impl<'t> Node<'t> {
 
     /// Indicates if this node is the root node.
     pub fn is_root(&self) -> bool {
-        self.entry().is(&self.tree().entries[0])
+        std::ptr::eq(self.entry(), &self.tree().entries[0])
     }
 
     /// Indicates if this node is a user content root.
@@ -817,7 +813,7 @@ impl<'t> Node<'t> {
     /// Indicates if this node is the default parent node for reparented
     /// orphans.
     pub fn is_default_parent_for_orphans(&self) -> bool {
-        self.entry().is(&self.tree().entries[self.tree().reparent_orphans_to_default_index()])
+        std::ptr::eq(self.entry(), &self.tree().entries[self.tree().reparent_orphans_to_default_index()])
     }
 
     #[inline]
@@ -950,6 +946,15 @@ impl<'t> MergedNode<'t> {
             MergeState::Local(_)
             | MergeState::LocalWithNewStructure(_)
             | MergeState::RemoteWithNewStructure(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn remote_guid_changed(&self) -> bool {
+        match self.merge_state {
+            MergeState::Remote(remote_node)
+            | MergeState::RemoteWithNewStructure(remote_node)
+            | MergeState::Unchanged { remote_node, .. } => remote_node.guid != self.guid,
             _ => false,
         }
     }

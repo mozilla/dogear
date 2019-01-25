@@ -54,18 +54,6 @@ const VALID_GUID_BYTES: [u8; 255] =
      0, 0, 0, 0, 0, 0, 0];
 
 impl Guid {
-    pub fn new(s: &str) -> Guid {
-        let repr = if Guid::is_valid(s.as_bytes()) {
-            assert!(s.is_char_boundary(12));
-            let mut bytes = [0u8; 12];
-            bytes.copy_from_slice(s.as_bytes());
-            Repr::Fast(bytes)
-        } else {
-            Repr::Slow(s.into())
-        };
-        Guid(repr)
-    }
-
     pub fn from_utf8(b: &[u8]) -> Option<Guid> {
         let repr = if Guid::is_valid(b) {
             let mut bytes = [0u8; 12];
@@ -139,7 +127,15 @@ impl Guid {
 impl<'a> From<&'a str> for Guid {
     #[inline]
     fn from(s: &'a str) -> Guid {
-        Guid::new(s)
+        let repr = if Guid::is_valid(s.as_bytes()) {
+            assert!(s.is_char_boundary(12));
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(s.as_bytes());
+            Repr::Fast(bytes)
+        } else {
+            Repr::Slow(s.into())
+        };
+        Guid(repr)
     }
 }
 

@@ -1845,7 +1845,7 @@ fn invalid_guids() {
     }).into_tree().unwrap();
     let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
-    let mut merger = Merger::with_driver(&AllowInvalidGuids,
+    let mut merger = Merger::with_driver(AllowInvalidGuids,
                                          &local_tree,
                                          &new_local_contents,
                                          &remote_tree,
