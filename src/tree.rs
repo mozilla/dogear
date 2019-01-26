@@ -15,7 +15,9 @@
 use std::{cmp::Ordering,
           collections::{HashMap, HashSet},
           fmt,
-          ops::Deref};
+          ops::Deref,
+          ptr,
+          slice};
 
 use error::{ErrorKind, Result};
 use guid::{Guid, ROOT_GUID, UNFILED_GUID, USER_CONTENT_ROOTS};
@@ -50,21 +52,21 @@ impl ParentGuidFrom {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Child {
     Missing(Guid),
-    Existing(Item),
+    Exists(Item),
 }
 
 impl Child {
     fn guid(&self) -> &Guid {
         match self {
             Child::Missing(guid) => guid,
-            Child::Existing(item) => &item.guid,
+            Child::Exists(item) => &item.guid,
         }
     }
 }
 
 impl From<Item> for Child {
     fn from(item: Item) -> Child {
-        Child::Existing(item)
+        Child::Exists(item)
     }
 }
 
@@ -304,7 +306,7 @@ impl Tree {
 
                 // Update the existing item with new data and divergent parents.
                 let mut entry = &mut self.entries[entry_index];
-                if let Child::Existing(item) = child {
+                if let Child::Exists(item) = child {
                     // Don't replace existing items with placeholders for
                     // missing children.
                     entry.item = item;
@@ -315,11 +317,11 @@ impl Tree {
 
             // The item doesn't exist in the tree yet, so just add it. This is
             // the happy path for valid trees: a `New` entry index for a child
-            // that's `Existing` with `One` parent from `Children`.
+            // that `Exists` with `One` parent from `Children`.
             EntryIndex::New(entry_index) => {
                 let (divergence, parents) = self.structure_for_insert(parent_guid, &child)?;
                 match child {
-                    Child::Existing(item) => {
+                    Child::Exists(item) => {
                         // The child exists, so add it to its parents.
                         for parent_from in parents.iter() {
                             match parent_from {
@@ -433,7 +435,7 @@ impl Tree {
                         // The item's `parentid` matches its parent's
                         // `children`, and has no orphaned children.
                         // Great! This is the happy path for valid trees.
-                        Divergence::Ok
+                        Divergence::Consistent
                     };
                     (divergence, EntryParents::One(EntryParentFrom::Children(parent_index)))
                 } else {
@@ -577,7 +579,7 @@ impl Entry {
     fn root(root: Item) -> Entry {
         Entry {
             item: root,
-            divergence: Divergence::Ok,
+            divergence: Divergence::Consistent,
             parents: EntryParents::Root,
             child_indices: Vec::new(),
         }
@@ -607,7 +609,7 @@ impl EntryParents {
     fn iter<'p>(&'p self) -> impl Iterator<Item = &EntryParentFrom> + 'p {
         match self {
             EntryParents::Root => &[],
-            EntryParents::One(parent_from) => std::slice::from_ref(parent_from),
+            EntryParents::One(parent_from) => slice::from_ref(parent_from),
             EntryParents::Many(parents_from) => parents_from,
         }.iter()
     }
@@ -658,7 +660,7 @@ enum EntryParentFrom {
 enum Divergence {
     /// The node's structure is already correct, and doesn't need to be
     /// reuploaded.
-    Ok,
+    Consistent,
 
     /// The node exists in multiple parents, or is a reparented orphan.
     /// The merger should reupload the node.
@@ -695,7 +697,7 @@ impl<'t> Node<'t> {
                 // Filter out children that resolve to other parents.
                 let child_node = Node(self.tree(), &self.tree().entries[child_index]);
                 child_node.parent()
-                    .filter(|parent_node| std::ptr::eq(parent_node.entry(), self.entry()))
+                    .filter(|parent_node| ptr::eq(parent_node.entry(), self.entry()))
                     .map(|_| child_node)
             })
     }
@@ -791,7 +793,7 @@ impl<'t> Node<'t> {
     pub fn diverged(&self) -> bool {
         match &self.entry().divergence {
             Divergence::Diverged => true,
-            Divergence::Ok => {
+            Divergence::Consistent => {
                 if self.is_default_parent_for_orphans() {
                     // If this node is the default folder for reparented orphans,
                     // check if we have any remaining orphans that reference
@@ -832,7 +834,7 @@ impl<'t> Node<'t> {
 
     /// Indicates if this node is the root node.
     pub fn is_root(&self) -> bool {
-        std::ptr::eq(self.entry(), &self.tree().entries[0])
+        ptr::eq(self.entry(), &self.tree().entries[0])
     }
 
     /// Indicates if this node is a user content root.
@@ -843,7 +845,7 @@ impl<'t> Node<'t> {
     /// Indicates if this node is the default parent node for reparented
     /// orphans.
     pub fn is_default_parent_for_orphans(&self) -> bool {
-        std::ptr::eq(self.entry(), &self.tree().entries[self.tree().reparent_orphans_to_default_index()])
+        ptr::eq(self.entry(), &self.tree().entries[self.tree().reparent_orphans_to_default_index()])
     }
 
     #[inline]
