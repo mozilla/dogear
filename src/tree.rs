@@ -561,6 +561,10 @@ enum EntryIndex {
 /// `HashMap<String, Entry>`, but that's inefficient: we'd need to store N
 /// copies of the GUID for parent and child lookups, and retrieving children
 /// would take one hash map lookup *per child*.
+///
+/// Note that we always compare references to entries, instead of deriving
+/// `PartialEq`, because two entries with the same fields but in different
+/// trees should never compare equal.
 #[derive(Debug)]
 struct Entry {
     item: Item,
@@ -688,13 +692,11 @@ impl<'t> Node<'t> {
             .chain(orphans.into_iter())
             .chain(default_orphans.into_iter())
             .filter_map(move |&child_index| {
-                let child_entry = &self.tree().entries[child_index];
-                let child_node = Node(self.tree(), child_entry);
-                match child_node.parent() {
-                    // Filter out children that resolve to other parents.
-                    Some(parent_node) if std::ptr::eq(parent_node.entry(), self.entry()) => Some(child_node),
-                    _ => None,
-                }
+                // Filter out children that resolve to other parents.
+                let child_node = Node(self.tree(), &self.tree().entries[child_index]);
+                child_node.parent()
+                    .filter(|parent_node| std::ptr::eq(parent_node.entry(), self.entry()))
+                    .map(|_| child_node)
             })
     }
 
@@ -795,10 +797,8 @@ impl<'t> Node<'t> {
                     // check if we have any remaining orphans that reference
                     // nonexistent or non-folder parents (rule 3).
                     let needs_reparenting = |guid| {
-                        match self.tree().entry_index_by_guid.get(guid) {
-                            Some(&index) => !self.tree().entries[index].item.is_folder(),
-                            None => true,
-                        }
+                        self.tree().entry_index_by_guid.get(guid)
+                            .map_or(true, |&index| !self.tree().entries[index].item.is_folder())
                     };
                     if self.tree().orphan_indices_by_parent_guid.keys().any(needs_reparenting) {
                         return true;
