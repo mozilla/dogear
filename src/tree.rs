@@ -219,7 +219,7 @@ impl Tree {
 
     #[inline]
     pub fn root(&self) -> Node {
-        Node(self, &self.entries[0], Divergence::Ok)
+        Node(self, &self.entries[0])
     }
 
     pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
@@ -246,39 +246,7 @@ impl Tree {
     pub fn node_for_guid(&self, guid: &Guid) -> Option<Node> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entry_index_by_guid.get(guid).map(|&index| {
-            let entry = &self.entries[index];
-            if self.orphan_indices_by_parent_guid.contains_key(&entry.item.guid) {
-                // Check if this node has reparented orphans (rule 2).
-                return Node(self, entry, Divergence::Diverged);
-            }
-            if std::ptr::eq(entry, &self.entries[self.reparent_orphans_to_default_index()]) {
-                // If this node is the default folder for reparented orphans,
-                // check if we have any remaining orphans that reference
-                // nonexistent or non-folder parents (rule 3).
-                let needs_reparenting = |guid| {
-                    match self.entry_index_by_guid.get(guid) {
-                        Some(&index) => !self.entries[index].item.is_folder(),
-                        None => true,
-                    }
-                };
-                if self.orphan_indices_by_parent_guid.keys().any(needs_reparenting) {
-                    return Node(self, entry, Divergence::Diverged);
-                }
-            }
-            match &entry.parents {
-                EntryParents::Root => {
-                    Node(self, entry, entry.divergence)
-                },
-                EntryParents::One(parent_from) => match parent_from {
-                    EntryParentFrom::Children(_) => {
-                        Node(self, entry, entry.divergence)
-                    },
-                    EntryParentFrom::Item(_) => {
-                        Node(self, entry, Divergence::Diverged)
-                    }
-                },
-                EntryParents::Many(_) => Node(self, entry, Divergence::Diverged)
-            }
+            Node(self, &self.entries[index])
         })
     }
 
@@ -287,61 +255,100 @@ impl Tree {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         match self.entry_index(&child)? {
             // An entry for the item already exists in the tree, so we need to
-            // mark the item, its existing parents, and new parents as diverged.
+            // mark the item, its existing parents, and new parents as
+            // divergent.
             EntryIndex::Existing(entry_index) => {
-                let (_, parents) = self.structure_for_insert(parent_guid, &child)?;
+                let (_, new_parents) = self.structure_for_insert(parent_guid, &child)?;
 
-                // Add the entry to the new parents.
-                for parent_index in parents.indices() {
-                    let parent_entry = &mut self.entries[parent_index];
-                    parent_entry.child_indices.push(entry_index);
-                }
-                for parent_guid in parents.guids() {
-                    let child_indices = self.orphan_indices_by_parent_guid
-                        .entry(parent_guid)
-                        .or_default();
-                    child_indices.push(entry_index);
-                }
-
-                // Update the existing entry's parents.
-                let parent_indices = {
-                    let mut entry = &mut self.entries[entry_index];
-                    let new_parents = entry.parents.clone().diverge(parents)
-                        .expect("Roots can't diverge");
-                    if let Child::Existing(item) = child {
-                        // Don't replace existing items with placeholders for
-                        // missing children. This should be impossible on
-                        // Desktop, which joins `items` and `structure` on the
-                        // GUID, but we can't assert that statically.
-                        entry.item = item;
+                // Add the item to the new parents. We do this before diverging,
+                // since we don't want to re-add the item to its existing
+                // parents.
+                for parent_from in new_parents.iter() {
+                    match parent_from {
+                        EntryParentFrom::Children(parent_index) => {
+                            let parent_entry = &mut self.entries[*parent_index];
+                            parent_entry.child_indices.push(entry_index);
+                        },
+                        EntryParentFrom::Item(parent_guid) => {
+                            let child_indices = self.orphan_indices_by_parent_guid
+                                .entry(parent_guid.clone())
+                                .or_default();
+                            child_indices.push(entry_index);
+                        },
                     }
-                    entry.divergence = Divergence::Diverged;
-                    entry.parents = new_parents;
-                    entry.parents.indices()
-                };
+                }
 
-                // Flag all parents as diverged.
-                for parent_index in parent_indices {
+                // Diverge the item's existing parents to add the new parents.
+                // It's safe to use `expect` here, since `entry_index` returns
+                // errors for duplicate roots, and `structure_for_insert` never
+                // returns roots.
+                let divergent_parents = self.entries[entry_index].parents
+                    .clone()
+                    .diverge(new_parents)
+                    .expect("Can't diverge tree root");
+
+                // Mark all parents as divergent.
+                for parent_from in divergent_parents.iter() {
+                    let parent_index = match parent_from {
+                        EntryParentFrom::Children(parent_index) => *parent_index,
+                        EntryParentFrom::Item(parent_guid) => {
+                            match self.entry_index_by_guid.get(parent_guid) {
+                                Some(&parent_index) => parent_index,
+                                None => continue,
+                            }
+                        },
+                    };
                     let parent_entry = &mut self.entries[parent_index];
                     parent_entry.divergence = Divergence::Diverged;
                 }
+
+                // Update the existing item with new data and divergent parents.
+                let mut entry = &mut self.entries[entry_index];
+                if let Child::Existing(item) = child {
+                    // Don't replace existing items with placeholders for
+                    // missing children.
+                    entry.item = item;
+                }
+                entry.divergence = Divergence::Diverged;
+                entry.parents = divergent_parents;
             },
 
-            // The item doesn't exist in the tree yet, so just add it.
+            // The item doesn't exist in the tree yet, so just add it. This is
+            // the happy path for valid trees: a `New` entry index for a child
+            // that's `Existing` with `One` parent from `Children`.
             EntryIndex::New(entry_index) => {
                 let (divergence, parents) = self.structure_for_insert(parent_guid, &child)?;
                 match child {
                     Child::Existing(item) => {
-                        // Add the entry to the new parents.
-                        for parent_index in parents.indices() {
-                            let parent_entry = &mut self.entries[parent_index];
-                            parent_entry.child_indices.push(entry_index);
-                        }
-                        for parent_guid in parents.guids() {
-                            let child_indices = self.orphan_indices_by_parent_guid
-                                .entry(parent_guid)
-                                .or_default();
-                            child_indices.push(entry_index);
+                        // The child exists, so add it to its parents.
+                        for parent_from in parents.iter() {
+                            match parent_from {
+                                EntryParentFrom::Children(parent_index) => {
+                                    let parent_entry = &mut self.entries[*parent_index];
+                                    if let Divergence::Diverged = divergence {
+                                        // If the new item diverged, mark its parents as divergent,
+                                        // too.
+                                        parent_entry.divergence = Divergence::Diverged;
+                                    }
+                                    parent_entry.child_indices.push(entry_index);
+                                },
+                                EntryParentFrom::Item(parent_guid) => {
+                                    // If the new item has a divergent `parentid`, and
+                                    // we have an entry for the `parentid`, mark the
+                                    // parent as divergent now.
+                                    let parent_index = self.entry_index_by_guid.get(parent_guid);
+                                    if let Some(&parent_index) = parent_index {
+                                        let parent_entry = &mut self.entries[parent_index];
+                                        parent_entry.divergence = Divergence::Diverged;
+                                    }
+                                    // ...And add the item to the list of orphans for
+                                    // its `parentid`.
+                                    let child_indices = self.orphan_indices_by_parent_guid
+                                        .entry(parent_guid.clone())
+                                        .or_default();
+                                    child_indices.push(entry_index);
+                                },
+                            }
                         }
 
                         self.entry_index_by_guid.insert(item.guid.clone(), entry_index);
@@ -353,8 +360,20 @@ impl Tree {
                         });
                     },
 
+                    // The parent's `children` is referencing an item that
+                    // doesn't exist in the tree, so flag the parent as
+                    // divergent.
                     Child::Missing(_) => {
-                        for parent_index in parents.indices() {
+                        for parent_from in parents.iter() {
+                            let parent_index = match parent_from {
+                                EntryParentFrom::Children(parent_index) => *parent_index,
+                                EntryParentFrom::Item(parent_guid) => {
+                                    match self.entry_index_by_guid.get(parent_guid) {
+                                        Some(&parent_index) => parent_index,
+                                        None => continue,
+                                    }
+                                },
+                            };
                             let parent_entry = &mut self.entries[parent_index];
                             parent_entry.divergence = Divergence::Diverged;
                         }
@@ -386,25 +405,13 @@ impl Tree {
     fn structure_for_insert(&self, parent_guid: ParentGuidFrom, child: &Child)
                             -> Result<(Divergence, EntryParents)> {
         Ok(match parent_guid {
-            // The item isn't mentioned in a folder's `children`, but may
-            // have a `parentid`.
-            ParentGuidFrom(None, from_item) => {
-                // Try the item's `parentid`, the default folder for orphans,
-                // and the root, in order.
-                let parent_from = from_item.map(|parent_guid| {
-                    EntryParentFrom::Item(parent_guid)
-                }).unwrap_or_else(|| {
-                    match &self.reparent_orphans_to {
-                        Some(parent_guid) => EntryParentFrom::Item(parent_guid.clone()),
-                        None => EntryParentFrom::Children(0),
-                    }
-                });
-                (Divergence::Diverged, EntryParents::One(parent_from))
-            },
-
             // The item is mentioned in at least one folder's `children`,
-            // and may also have a `parentid`.
-            ParentGuidFrom(Some(from_children), from_item) => {
+            // and has a `parentid`.
+            ParentGuidFrom(Some(from_children), Some(from_item)) => {
+                // For parents from `children`, we expect the parent folder to
+                // exist in the tree before adding its children. Unlike
+                // `parentid`s, `children` can form a complete tree with item
+                // parents and positions.
                 let parent_index = match self.entry_index_by_guid.get(&from_children) {
                     Some(parent_index) => *parent_index,
                     None => return Err(ErrorKind::MissingParent(child.guid().clone(),
@@ -415,26 +422,62 @@ impl Tree {
                     return Err(ErrorKind::InvalidParent(child.guid().clone(),
                                                         parent_entry.item.guid.clone()).into());
                 }
-                from_item.map(|from_item| {
-                    if from_item == from_children {
-                        // If the parent's `children` and item's `parentid`
-                        // agree, great!
-                        (Divergence::Ok,
-                         EntryParents::One(EntryParentFrom::Children(parent_index)))
+                if from_item == from_children {
+                    let divergence = if self.orphan_indices_by_parent_guid.contains_key(child.guid()) {
+                        // We're adding a folder with orphaned children, where
+                        // one or more items reference this folder as their
+                        // `parentid`, but aren't mentioned in this folder's
+                        // `children` (rule 2).
+                        Divergence::Diverged
                     } else {
-                        // Otherwise, the item has a parent-child disagreement.
-                        // Store both parents and mark it as diverged.
-                        (Divergence::Diverged, EntryParents::Many(vec![
-                            EntryParentFrom::Children(parent_index),
-                            EntryParentFrom::Item(from_item),
-                        ]))
-                    }
-                }).unwrap_or_else(|| {
-                    // If the item doesn't have a `parentid` at all, mark it as
-                    // diverged for the merger to reupload.
-                    (Divergence::Diverged,
-                     EntryParents::One(EntryParentFrom::Children(parent_index)))
-                })
+                        // The item's `parentid` matches its parent's
+                        // `children`, and has no orphaned children.
+                        // Great! This is the happy path for valid trees.
+                        Divergence::Ok
+                    };
+                    (divergence, EntryParents::One(EntryParentFrom::Children(parent_index)))
+                } else {
+                    // Otherwise, the item has a parent-child disagreement.
+                    // Store both parents and mark it as diverged.
+                    (Divergence::Diverged, EntryParents::Many(vec![
+                        EntryParentFrom::Children(parent_index),
+                        EntryParentFrom::Item(from_item),
+                    ]))
+                }
+            },
+
+            // The item is mentioned in a folder's `children`, but doesn't have
+            // a `parentid`. Mark it as diverged for the merger to reupload.
+            ParentGuidFrom(Some(from_children), None) => {
+                let parent_index = match self.entry_index_by_guid.get(&from_children) {
+                    Some(parent_index) => *parent_index,
+                    None => return Err(ErrorKind::MissingParent(child.guid().clone(),
+                                                                from_children.clone()).into()),
+                };
+                let parent_entry = &self.entries[parent_index];
+                if !parent_entry.item.is_folder() {
+                    return Err(ErrorKind::InvalidParent(child.guid().clone(),
+                                                        parent_entry.item.guid.clone()).into());
+                }
+                (Divergence::Diverged,
+                 EntryParents::One(EntryParentFrom::Children(parent_index)))
+            },
+
+            // The item isn't mentioned in a folder's `children`, but has a
+            // `parentid` (rule 2).
+            ParentGuidFrom(None, Some(from_item)) => {
+                (Divergence::Diverged, EntryParents::One(EntryParentFrom::Item(from_item)))
+            },
+
+            // The item isn't mentioned in a folder's `children`, and doesn't
+            // have a `parentid`. Fall back to the default folder for orphans
+            // (rule 3), or the root (rule 4).
+            ParentGuidFrom(None, None) => {
+                let parent_from = match &self.reparent_orphans_to {
+                    Some(parent_guid) => EntryParentFrom::Item(parent_guid.clone()),
+                    None => EntryParentFrom::Children(0),
+                };
+                (Divergence::Diverged, EntryParents::One(parent_from))
             },
         })
     }
@@ -537,7 +580,7 @@ impl Entry {
     }
 }
 
-/// Stores structure state for an entry.
+/// Stores potential parents for an entry in the tree.
 #[derive(Clone, Debug)]
 enum EntryParents {
     /// The entry is a top-level root, from which all other entries descend.
@@ -556,6 +599,16 @@ enum EntryParents {
 }
 
 impl EntryParents {
+    /// Returns an iterator over the parents.
+    fn iter<'p>(&'p self) -> impl Iterator<Item = &EntryParentFrom> + 'p {
+        match self {
+            EntryParents::Root => &[],
+            EntryParents::One(parent_from) => std::slice::from_ref(parent_from),
+            EntryParents::Many(parents_from) => parents_from,
+        }.iter()
+    }
+
+    /// Merges a set of existing parents with a set of new parents.
     fn diverge(self, parents: EntryParents) -> Option<EntryParents> {
         match (self, parents) {
             (EntryParents::Root, EntryParents::Root) => Some(EntryParents::Root),
@@ -575,38 +628,6 @@ impl EntryParents {
                 Some(EntryParents::Many(new_parents))
             },
             _ => None,
-        }
-    }
-
-    fn indices(&self) -> Vec<Index> {
-        match self {
-            EntryParents::Root => Vec::new(),
-            EntryParents::One(parent_from) => match parent_from {
-                EntryParentFrom::Children(parent_index) => vec![*parent_index],
-                EntryParentFrom::Item(_) => Vec::new(),
-            },
-            EntryParents::Many(parents_from) => {
-                parents_from.iter().filter_map(|parent_from| match parent_from {
-                    EntryParentFrom::Children(index) => Some(*index),
-                    EntryParentFrom::Item(_) => None,
-                }).collect()
-            }
-        }
-    }
-
-    fn guids(&self) -> Vec<Guid> {
-        match self {
-            EntryParents::Root => Vec::new(),
-            EntryParents::One(parent_from) => match parent_from {
-                EntryParentFrom::Children(_) => Vec::new(),
-                EntryParentFrom::Item(guid) => vec![guid.clone()],
-            },
-            EntryParents::Many(parents_from) => {
-                parents_from.iter().filter_map(|parent_from| match parent_from {
-                    EntryParentFrom::Children(_) => None,
-                    EntryParentFrom::Item(guid) => Some(guid.clone()),
-                }).collect()
-            }
         }
     }
 }
@@ -629,7 +650,7 @@ enum EntryParentFrom {
     Item(Guid),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 enum Divergence {
     /// The node's structure is already correct, and doesn't need to be
     /// reuploaded.
@@ -643,45 +664,38 @@ enum Divergence {
 /// A convenience wrapper around `Entry` that dereferences to the containing
 /// item, and follows indices for parents and children.
 #[derive(Clone, Copy, Debug)]
-pub struct Node<'t>(&'t Tree, &'t Entry, Divergence);
+pub struct Node<'t>(&'t Tree, &'t Entry);
 
 impl<'t> Node<'t> {
     /// Returns an iterator for all resolved children of this node, including
     /// reparented orphans.
     pub fn children<'n>(&'n self) -> impl Iterator<Item = Node<'t>> + 'n {
         let orphans = self.tree().orphan_indices_by_parent_guid.get(&self.entry().item.guid)
-            .map(|child_indices| {
-                child_indices.iter().map(|&child_index| {
-                    Node(self.tree(), &self.tree().entries[child_index], Divergence::Diverged)
-                }).collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            .iter()
+            .flat_map(|orphan_indices| orphan_indices.iter())
+            .collect::<Vec<_>>();
 
         let default_orphans = if self.is_default_parent_for_orphans() {
             self.tree().orphan_indices_by_parent_guid.iter()
                 .filter(|(guid, _)| !self.tree().entry_index_by_guid.contains_key(guid))
-                .flat_map(|(_, child_indices)| {
-                    child_indices.iter().map(|&child_index| {
-                        Node(self.tree(), &self.tree().entries[child_index], Divergence::Diverged)
-                    })
-                })
+                .flat_map(|(_, child_indices)| child_indices)
                 .collect()
         } else {
             Vec::new()
         };
 
         self.entry().child_indices.iter()
+            .chain(orphans.into_iter())
+            .chain(default_orphans.into_iter())
             .filter_map(move |&child_index| {
                 let child_entry = &self.tree().entries[child_index];
-                let child_node = Node(self.tree(), child_entry, child_entry.divergence);
+                let child_node = Node(self.tree(), child_entry);
                 match child_node.parent() {
                     // Filter out children that resolve to other parents.
                     Some(parent_node) if std::ptr::eq(parent_node.entry(), self.entry()) => Some(child_node),
                     _ => None,
                 }
             })
-            .chain(orphans.into_iter())
-            .chain(default_orphans.into_iter())
     }
 
     /// Returns the resolved parent of this node.
@@ -694,7 +708,7 @@ impl<'t> Node<'t> {
                     EntryParentFrom::Item(guid) => self.tree().reparent_orphans_to_index(guid),
                 };
                 let parent_entry = &self.tree().entries[parent_index];
-                Some(Node(self.tree(), parent_entry, parent_entry.divergence))
+                Some(Node(self.tree(), parent_entry))
             },
             EntryParents::Many(parents_from) => {
                 parents_from.iter()
@@ -730,7 +744,7 @@ impl<'t> Node<'t> {
                             },
                         };
                         let parent_entry = &self.tree().entries[parent_index];
-                        Node(self.tree(), parent_entry, Divergence::Diverged)
+                        Node(self.tree(), parent_entry)
                     })
             },
         }
@@ -773,9 +787,25 @@ impl<'t> Node<'t> {
     }
 
     pub fn diverged(&self) -> bool {
-        match &self.2 {
-            Divergence::Ok => false,
+        match &self.entry().divergence {
             Divergence::Diverged => true,
+            Divergence::Ok => {
+                if self.is_default_parent_for_orphans() {
+                    // If this node is the default folder for reparented orphans,
+                    // check if we have any remaining orphans that reference
+                    // nonexistent or non-folder parents (rule 3).
+                    let needs_reparenting = |guid| {
+                        match self.tree().entry_index_by_guid.get(guid) {
+                            Some(&index) => !self.tree().entries[index].item.is_folder(),
+                            None => true,
+                        }
+                    };
+                    if self.tree().orphan_indices_by_parent_guid.keys().any(needs_reparenting) {
+                        return true;
+                    }
+                }
+                false
+            },
         }
     }
 
