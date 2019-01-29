@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{error, fmt, result};
+use std::{error, fmt, result, str::Utf8Error, string::FromUtf16Error};
 
 use guid::Guid;
 use tree::Kind;
@@ -28,7 +28,14 @@ impl Error {
     }
 }
 
-impl error::Error for Error {}
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self.kind() {
+            ErrorKind::MalformedString(err) => Some(err.as_ref()),
+            _ => None
+        }
+    }
+}
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
@@ -36,28 +43,21 @@ impl From<ErrorKind> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
+impl From<FromUtf16Error> for Error {
+    fn from(error: FromUtf16Error) -> Error {
+        Error(ErrorKind::MalformedString(error.into()))
     }
 }
 
-#[derive(Debug)]
-pub enum ErrorKind {
-    MismatchedItemKind(Kind, Kind),
-    DuplicateItem(Guid),
-    InvalidParent(Guid, Guid),
-    MissingParent(Guid, Guid),
-    Storage(&'static str, u32),
-    MergeConflict,
-    UnmergedLocalItems,
-    UnmergedRemoteItems,
-    GenerateGuid(Guid),
+impl From<Utf8Error> for Error {
+    fn from(error: Utf8Error) -> Error {
+        Error(ErrorKind::MalformedString(error.into()))
+    }
 }
 
-impl fmt::Display for ErrorKind {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+        match self.kind() {
             ErrorKind::MismatchedItemKind(local_kind, remote_kind) => {
                 write!(f, "Can't merge local kind {} and remote kind {}",
                        local_kind, remote_kind)
@@ -73,9 +73,6 @@ impl fmt::Display for ErrorKind {
                 write!(f, "Can't insert item {} into nonexistent parent {}",
                        child_guid, parent_guid)
             },
-            ErrorKind::Storage(message, result) => {
-                write!(f, "Storage error: {} ({})", message, result)
-            },
             ErrorKind::MergeConflict => {
                 write!(f, "Local tree changed during merge")
             },
@@ -85,9 +82,27 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnmergedRemoteItems => {
                 write!(f, "Merged tree doesn't mention all items from remote tree")
             },
-            ErrorKind::GenerateGuid(invalid_guid) => {
-                write!(f, "Failed to generate new GUID for {}", invalid_guid)
-            }
+            ErrorKind::InvalidGuid(invalid_guid) => {
+                write!(f, "Merged tree contains invalid GUID {}", invalid_guid)
+            },
+            ErrorKind::InvalidByte(b) => {
+                write!(f, "Invalid byte {} in UTF-16 encoding", b)
+            },
+            ErrorKind::MalformedString(err) => err.fmt(f),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ErrorKind {
+    MismatchedItemKind(Kind, Kind),
+    DuplicateItem(Guid),
+    InvalidParent(Guid, Guid),
+    MissingParent(Guid, Guid),
+    MergeConflict,
+    UnmergedLocalItems,
+    UnmergedRemoteItems,
+    InvalidGuid(Guid),
+    InvalidByte(u16),
+    MalformedString(Box<dyn error::Error + Send + Sync + 'static>),
 }

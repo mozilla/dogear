@@ -90,7 +90,7 @@ impl Driver for DefaultDriver {
     /// The default implementation returns an error and fails the merge if any
     /// items have invalid GUIDs.
     fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
-        Err(ErrorKind::GenerateGuid(invalid_guid.clone()).into())
+        Err(ErrorKind::InvalidGuid(invalid_guid.clone()).into())
     }
 }
 

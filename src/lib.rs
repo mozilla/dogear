@@ -27,5 +27,5 @@ mod tests;
 pub use error::{Error, ErrorKind, Result};
 pub use guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 pub use merge::{Deletion, Merger, StructureCounts};
-pub use store::{Store, merge};
-pub use tree::{Content, Item, Kind, MergeState, MergedNode, Tree};
+pub use store::Store;
+pub use tree::{Child, Content, Item, Kind, MergeState, MergedNode, ParentGuidFrom, Tree};

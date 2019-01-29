@@ -14,6 +14,8 @@
 
 use std::{fmt, str, ops};
 
+use error::{Result, ErrorKind};
+
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Guid(Repr);
 
@@ -54,7 +56,7 @@ const VALID_GUID_BYTES: [u8; 255] =
      0, 0, 0, 0, 0, 0, 0];
 
 impl Guid {
-    pub fn from_utf8(b: &[u8]) -> Option<Guid> {
+    pub fn from_utf8(b: &[u8]) -> Result<Guid> {
         let repr = if Guid::is_valid(b) {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(b);
@@ -62,29 +64,29 @@ impl Guid {
         } else {
             match str::from_utf8(b) {
                 Ok(s) => Repr::Slow(s.into()),
-                Err(_) => return None
+                Err(err) => return Err(err.into()),
             }
         };
-        Some(Guid(repr))
+        Ok(Guid(repr))
     }
 
-    pub fn from_utf16(b: &[u16]) -> Option<Guid> {
+    pub fn from_utf16(b: &[u16]) -> Result<Guid> {
         let repr = if Guid::is_valid(b) {
             let mut bytes = [0u8; 12];
             for (index, byte) in b.iter().enumerate() {
                 match byte.into_byte() {
                     Some(byte) => bytes[index] = byte,
-                    None => return None
+                    None => return Err(ErrorKind::InvalidByte(*byte).into()),
                 };
             }
             Repr::Fast(bytes)
         } else {
             match String::from_utf16(b) {
                 Ok(s) => Repr::Slow(s),
-                Err(_) => return None
+                Err(err) => return Err(err.into()),
             }
         };
-        Some(Guid(repr))
+        Ok(Guid(repr))
     }
 
     #[inline]
