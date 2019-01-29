@@ -267,7 +267,7 @@ impl <'t, D: Driver> Merger<'t, D> {
         };
 
         let mut merged_node = MergedNode::new(merged_guid,
-                                              MergeState::Local(local_node));
+                                              MergeState::Local { local_node, remote_node: None });
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -302,7 +302,7 @@ impl <'t, D: Driver> Merger<'t, D> {
         };
 
         let mut merged_node = MergedNode::new(merged_guid,
-                                              MergeState::Remote(remote_node));
+                                              MergeState::Remote { local_node: None, remote_node });
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -347,10 +347,10 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
             ConflictResolution::Local => {
-                MergeState::Local(local_node)
+                MergeState::Local { local_node, remote_node: Some(remote_node) }
             },
             ConflictResolution::Remote => {
-                MergeState::Remote(remote_node)
+                MergeState::Remote { local_node: Some(local_node), remote_node }
             },
             ConflictResolution::Unchanged => {
                 MergeState::Unchanged { local_node, remote_node }
