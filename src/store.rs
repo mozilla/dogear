@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
+use crate::driver::{LogLevel, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Merger, Deletion};
 use crate::tree::{Content, MergedNode, Tree};
 
-pub trait Store<E: From<Error>> {
+pub trait Store<D: Driver, E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the local store.
     fn fetch_local_tree(&self, local_time_millis: i64) -> Result<Tree, E>;
@@ -29,20 +30,27 @@ pub trait Store<E: From<Error>> {
     /// table, update Places, and stage outgoing items in another temp
     /// table. Afterward, we can inflate records on the JS side. On mobile,
     /// this flow might be simpler.
-    fn apply<D: Iterator<Item = Deletion>>(&mut self,
+    fn apply<T: Iterator<Item = Deletion>>(&mut self,
                                            merged_root: &MergedNode,
-                                           deletions: D) -> Result<(), E>;
+                                           deletions: T) -> Result<(), E>;
 
-    fn merge(&mut self, local_time_millis: i64, remote_time_millis: i64) -> Result<(), E> {
+    fn merge(&mut self, driver: &D, local_time_millis: i64,
+             remote_time_millis: i64) -> Result<(), E> {
+
         let local_tree = self.fetch_local_tree(local_time_millis)?;
+        trace!(driver, "Built local tree from mirror\n{}", local_tree);
         let new_local_contents = self.fetch_new_local_contents()?;
 
         let remote_tree = self.fetch_remote_tree(remote_time_millis)?;
+        trace!(driver, "Built remote tree from mirror\n{}", remote_tree);
         let new_remote_contents = self.fetch_new_remote_contents()?;
 
-        let mut merger = Merger::with_contents(&local_tree, &new_local_contents,
-                                               &remote_tree, &new_remote_contents);
+        let mut merger = Merger::with_driver(driver, &local_tree, &new_local_contents,
+                                             &remote_tree, &new_remote_contents);
         let merged_root = merger.merge()?;
+        if driver.log_level() >= LogLevel::Trace {
+            trace!(driver, "Built new merged tree\n{}", merged_root.to_ascii_string());
+        }
 
         if !merger.subsumes(&local_tree) {
             Err(E::from(ErrorKind::UnmergedLocalItems.into()))?;

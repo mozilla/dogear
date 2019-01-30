@@ -6,9 +6,3 @@ repository = "https://github.com/linacambridge/dogear"
 authors = ["Lina Cambridge <lina@mozilla.com>"]
 license = "Apache-2.0"
 exclude = [".travis", ".travis.yml"]
-
-[dependencies]
-log = "0.4"
-
-[dev-dependencies]
-env_logger = "0.5.6"

@@ -15,6 +15,7 @@
 use std::{collections::{HashMap, HashSet, VecDeque},
           mem};
 
+use crate::driver::{DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::Guid;
 use crate::tree::{Content, MergeState, MergedNode, Node, Tree};
@@ -64,36 +65,6 @@ enum ConflictResolution {
     Unchanged,
 }
 
-/// A merge driver provides methods to customize merging behavior.
-pub trait Driver {
-    /// Generates a new GUID for the given invalid GUID. This is used to fix up
-    /// items with GUIDs that Places can't store (bug 1380606, bug 1313026).
-    ///
-    /// Implementations of `Driver` can either use the `rand` and `base64`
-    /// crates to generate a new, random GUID (9 bytes, Base64url-encoded
-    /// without padding), or use an existing method like Desktop's
-    /// `nsINavHistoryService::MakeGuid`. Dogear doesn't generate new GUIDs
-    /// automatically to avoid depending on those crates.
-    ///
-    /// An implementation can also return:
-    ///
-    /// - `Ok(invalid_guid.clone())` to pass through all invalid GUIDs, as the
-    ///   tests do.
-    /// - An error to forbid them entirely, as `DefaultDriver` does.
-    fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid>;
-}
-
-/// A default implementation of the merge driver.
-pub struct DefaultDriver;
-
-impl Driver for DefaultDriver {
-    /// The default implementation returns an error and fails the merge if any
-    /// items have invalid GUIDs.
-    fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
-        Err(ErrorKind::InvalidGuid(invalid_guid.clone()).into())
-    }
-}
-
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
 ///
@@ -117,7 +88,7 @@ impl Driver for DefaultDriver {
 /// simultaneously. A simpler two-way tree merge strikes a good balance between
 /// correctness and complexity.
 pub struct Merger<'t, D = DefaultDriver> {
-    driver: D,
+    driver: &'t D,
     local_tree: &'t Tree,
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
@@ -131,7 +102,7 @@ pub struct Merger<'t, D = DefaultDriver> {
 
 impl<'t> Merger<'t, DefaultDriver> {
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
-        Merger { driver: DefaultDriver,
+        Merger { driver: &DefaultDriver,
                  local_tree,
                  new_local_contents: None,
                  remote_tree,
@@ -149,13 +120,13 @@ impl<'t> Merger<'t, DefaultDriver> {
                          new_remote_contents: &'t HashMap<Guid, Content>)
                          -> Merger<'t>
     {
-        Merger::with_driver(DefaultDriver, local_tree, new_local_contents, remote_tree,
+        Merger::with_driver(&DefaultDriver, local_tree, new_local_contents, remote_tree,
                             new_remote_contents)
     }
 }
 
 impl <'t, D: Driver> Merger<'t, D> {
-    pub fn with_driver(driver: D, local_tree: &'t Tree,
+    pub fn with_driver(driver: &'t D, local_tree: &'t Tree,
                        new_local_contents: &'t HashMap<Guid, Content>,
                        remote_tree: &'t Tree,
                        new_remote_contents: &'t HashMap<Guid, Content>)
@@ -252,7 +223,7 @@ impl <'t, D: Driver> Merger<'t, D> {
     }
 
     fn merge_local_node(&mut self, local_node: Node<'t>) -> Result<MergedNode<'t>> {
-        trace!("Item {} only exists locally", local_node);
+        trace!(self.driver, "Item {} only exists locally", local_node);
 
         self.merged_guids.insert(local_node.guid.clone());
 
@@ -285,7 +256,7 @@ impl <'t, D: Driver> Merger<'t, D> {
     }
 
     fn merge_remote_node(&mut self, remote_node: Node<'t>) -> Result<MergedNode<'t>> {
-        trace!("Item {} only exists remotely", remote_node);
+        trace!(self.driver, "Item {} only exists remotely", remote_node);
 
         self.merged_guids.insert(remote_node.guid.clone());
 
@@ -324,14 +295,14 @@ impl <'t, D: Driver> Merger<'t, D> {
                      remote_node: Node<'t>)
                      -> Result<MergedNode<'t>>
     {
-        trace!("Item exists locally as {} and remotely as {}",
+        trace!(self.driver, "Item exists locally as {} and remotely as {}",
                local_node,
                remote_node);
 
         if !local_node.has_compatible_kind(&remote_node) {
             // TODO(lina): Remove and replace items with mismatched kinds in
             // `check_for_{}_structure_change_of_{}_node`.
-            error!("Merging local {} and remote {} with different kinds",
+            error!(self.driver, "Merging local {} and remote {} with different kinds",
                    local_node, remote_node);
             return Err(ErrorKind::MismatchedItemKind(local_node.kind, remote_node.kind).into());
         }
@@ -417,12 +388,12 @@ impl <'t, D: Driver> Merger<'t, D> {
                                            -> Result<()>
     {
         if self.merged_guids.contains(&remote_child_node.guid) {
-            trace!("Remote child {} already seen in another folder and merged",
+            trace!(self.driver, "Remote child {} already seen in another folder and merged",
                    remote_child_node);
             return Ok(());
         }
 
-        trace!("Merging remote child {} of {} into {}",
+        trace!(self.driver, "Merging remote child {} of {} into {}",
                remote_child_node,
                remote_parent_node,
                merged_node);
@@ -451,14 +422,14 @@ impl <'t, D: Driver> Merger<'t, D> {
                 local_child_node.parent()
                                 .expect("Can't merge existing remote child without local parent");
 
-            trace!("Remote child {} exists locally in {} and remotely in {}",
+            trace!(self.driver, "Remote child {} exists locally in {} and remotely in {}",
                    remote_child_node,
                    local_parent_node,
                    remote_parent_node);
 
             if self.remote_tree.is_deleted(&local_parent_node.guid) {
-                trace!("Unconditionally taking remote move for {} to {} because local parent {} is \
-                        deleted remotely",
+                trace!(self.driver, "Unconditionally taking remote move for {} to {} because local \
+                        parent {} is deleted remotely",
                        remote_child_node,
                        remote_parent_node,
                        local_parent_node);
@@ -485,7 +456,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     // The local move is newer, so we ignore the remote move.
                     // We'll merge the remote child later, when we walk its new
                     // local parent.
-                    trace!("Remote child {} moved locally to {} and remotely to {}; \
+                    trace!(self.driver, "Remote child {} moved locally to {} and remotely to {}; \
                             keeping child in newer local parent and position",
                            remote_child_node,
                            local_parent_node,
@@ -501,7 +472,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we merge the remote
                     // child now and ignore the local move.
-                    trace!("Remote child {} moved locally to {} and remotely to {}; \
+                    trace!(self.driver, "Remote child {} moved locally to {} and remotely to {}; \
                             keeping child in newer remote parent and position",
                            remote_child_node,
                            local_parent_node,
@@ -523,7 +494,8 @@ impl <'t, D: Driver> Merger<'t, D> {
         // Remote child is not a root, and doesn't exist locally. Try to find a
         // content match in the containing folder, and dedupe the local item if
         // we can.
-        trace!("Remote child {} doesn't exist locally; looking for local content match",
+        trace!(self.driver, "Remote child {} doesn't exist locally; looking for \
+                local content match",
                remote_child_node);
 
         let mut merged_child_node = if let Some(local_child_node_by_content) =
@@ -558,12 +530,12 @@ impl <'t, D: Driver> Merger<'t, D> {
     {
         if self.merged_guids.contains(&local_child_node.guid) {
             // We already merged the child when we walked another folder.
-            trace!("Local child {} already seen in another folder and merged",
+            trace!(self.driver, "Local child {} already seen in another folder and merged",
                    local_child_node);
             return Ok(());
         }
 
-        trace!("Merging local child {} of {} into {}",
+        trace!(self.driver, "Merging local child {} of {} into {}",
                local_child_node,
                local_parent_node,
                merged_node);
@@ -589,14 +561,14 @@ impl <'t, D: Driver> Merger<'t, D> {
                 remote_child_node.parent()
                                  .expect("Can't merge existing local child without remote parent");
 
-            trace!("Local child {} exists locally in {} and remotely in {}",
+            trace!(self.driver, "Local child {} exists locally in {} and remotely in {}",
                    local_child_node,
                    local_parent_node,
                    remote_parent_node);
 
             if self.local_tree.is_deleted(&remote_parent_node.guid) {
-                trace!("Unconditionally taking local move for {} to {} because remote parent {} is \
-                        deleted locally",
+                trace!(self.driver, "Unconditionally taking local move for {} to {} because remote \
+                        parent {} is deleted locally",
                        local_child_node,
                        local_parent_node,
                        remote_parent_node);
@@ -628,8 +600,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                     // and ignore the remote move.
                     if local_parent_node.guid != remote_parent_node.guid {
                         // The child moved to a different folder.
-                        trace!("Local child {} reparented locally to {} and remotely to {}; \
-                                keeping child in newer local parent",
+                        trace!(self.driver, "Local child {} reparented locally to {} and \
+                                remotely to {}; keeping child in newer local parent",
                                local_child_node,
                                local_parent_node,
                                remote_parent_node);
@@ -643,8 +615,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                             merged_child_node.merge_state.with_new_structure();
                         merged_node.merged_children.push(merged_child_node);
                     } else {
-                        trace!("Local child {} repositioned locally in {} and remotely in {}; \
-                                keeping child in newer local position",
+                        trace!(self.driver, "Local child {} repositioned locally in {} and \
+                                remotely in {}; keeping child in newer local position",
                                local_child_node,
                                local_parent_node,
                                remote_parent_node);
@@ -669,14 +641,14 @@ impl <'t, D: Driver> Merger<'t, D> {
                     // move. We'll merge the local child later, when we
                     // walk its new remote parent.
                     if local_parent_node.guid != remote_parent_node.guid {
-                        trace!("Local child {} reparented locally to {} and remotely to {}; \
-                                keeping child in newer remote parent",
+                        trace!(self.driver, "Local child {} reparented locally to {} and \
+                                remotely to {}; keeping child in newer remote parent",
                                local_child_node,
                                local_parent_node,
                                remote_parent_node);
                     } else {
-                        trace!("Local child {} repositioned locally in {} and remotely in {}; \
-                                keeping child in newer remote position",
+                        trace!(self.driver, "Local child {} repositioned locally in {} and \
+                                remotely in {}; keeping child in newer remote position",
                                local_child_node,
                                local_parent_node,
                                remote_parent_node);
@@ -690,7 +662,8 @@ impl <'t, D: Driver> Merger<'t, D> {
         // Local child is not a root, and doesn't exist remotely. Try to find a
         // content match in the containing folder, and dedupe the local item if
         // we can.
-        trace!("Local child {} doesn't exist remotely; looking for remote content match",
+        trace!(self.driver, "Local child {} doesn't exist remotely; \
+                looking for remote content match",
                local_child_node);
 
         let merged_child_node = if let Some(remote_child_node_by_content) =
@@ -874,8 +847,8 @@ impl <'t, D: Driver> Merger<'t, D> {
             if !remote_node.is_folder() {
                 // If a non-folder child is deleted locally and changed remotely, we
                 // ignore the local deletion and take the remote child.
-                trace!("Remote non-folder {} deleted locally and changed remotely; taking remote \
-                        change",
+                trace!(self.driver, "Remote non-folder {} deleted locally and changed remotely; \
+                        taking remote change",
                        remote_node);
                 self.structure_counts.remote_revives += 1;
                 return Ok(StructureChange::Unchanged);
@@ -884,12 +857,13 @@ impl <'t, D: Driver> Merger<'t, D> {
             // changed grandchildren to the merged node. We could use the remote
             // tree to revive the child folder, but it's easier to relocate orphaned
             // grandchildren than to partially revive the child folder.
-            trace!("Remote folder {} deleted locally and changed remotely; taking local deletion",
+            trace!(self.driver, "Remote folder {} deleted locally and changed remotely; \
+                    taking local deletion",
                    remote_node);
             self.structure_counts.local_deletes += 1;
         } else {
-            trace!("Remote node {} deleted locally and not changed remotely; taking local \
-                    deletion",
+            trace!(self.driver, "Remote node {} deleted locally and not changed remotely; \
+                    taking local deletion",
                    remote_node);
         }
 
@@ -950,18 +924,19 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         if local_node.needs_merge {
             if !local_node.is_folder() {
-                trace!("Local non-folder {} deleted remotely and changed locally; taking local \
-                        change",
+                trace!(self.driver, "Local non-folder {} deleted remotely and changed locally; \
+                        taking local change",
                        local_node);
                 self.structure_counts.local_revives += 1;
                 return Ok(StructureChange::Unchanged);
             }
-            trace!("Local folder {} deleted remotely and changed locally; taking remote deletion",
+            trace!(self.driver, "Local folder {} deleted remotely and changed locally; \
+                    taking remote deletion",
                    local_node);
             self.structure_counts.remote_deletes += 1;
         } else {
-            trace!("Local node {} deleted remotely and not changed locally; taking remote \
-                    deletion",
+            trace!(self.driver, "Local node {} deleted remotely and not changed locally; \
+                    taking remote deletion",
                    local_node);
         }
 
@@ -988,7 +963,8 @@ impl <'t, D: Driver> Merger<'t, D> {
     {
         for remote_child_node in remote_node.children() {
             if self.merged_guids.contains(&remote_child_node.guid) {
-                trace!("Remote child {} can't be an orphan; already merged", remote_child_node);
+                trace!(self.driver, "Remote child {} can't be an orphan; already merged",
+                       remote_child_node);
                 continue;
             }
             match self.check_for_local_structure_change_of_remote_node(merged_node,
@@ -1001,7 +977,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     continue;
                 },
                 StructureChange::Unchanged => {
-                    trace!("Relocating remote orphan {} to {}",
+                    trace!(self.driver, "Relocating remote orphan {} to {}",
                            remote_child_node,
                            merged_node);
 
@@ -1035,7 +1011,8 @@ impl <'t, D: Driver> Merger<'t, D> {
     {
         for local_child_node in local_node.children() {
             if self.merged_guids.contains(&local_child_node.guid) {
-                trace!("Local child {} can't be an orphan; already merged", local_child_node);
+                trace!(self.driver, "Local child {} can't be an orphan; already merged",
+                       local_child_node);
                 continue;
             }
             match self.check_for_remote_structure_change_of_local_node(merged_node,
@@ -1048,7 +1025,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     continue;
                 },
                 StructureChange::Unchanged => {
-                    trace!("Relocating local orphan {} to {}",
+                    trace!(self.driver, "Relocating local orphan {} to {}",
                            local_child_node,
                            merged_node);
 
@@ -1105,13 +1082,14 @@ impl <'t, D: Driver> Merger<'t, D> {
                 if let Some(remote_child_node) =
                     self.remote_tree.node_for_guid(&local_child_node.guid)
                 {
-                    trace!("Not deduping local child {}; already exists remotely as {}",
+                    trace!(self.driver, "Not deduping local child {}; already exists \
+                            remotely as {}",
                            local_child_node,
                            remote_child_node);
                     continue;
                 }
                 if self.remote_tree.is_deleted(&local_child_node.guid) {
-                    trace!("Not deduping local child {}; deleted remotely",
+                    trace!(self.driver, "Not deduping local child {}; deleted remotely",
                            local_child_node);
                     continue;
                 }
@@ -1122,7 +1100,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                                                                  .or_default();
                 local_nodes_for_key.push_back(local_child_node);
             } else {
-                trace!("Not deduping local child {}; already uploaded",
+                trace!(self.driver, "Not deduping local child {}; already uploaded",
                        local_child_node);
             }
         }
@@ -1132,7 +1110,7 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         for remote_child_node in remote_parent_node.children() {
             if remote_to_local.contains_key(&remote_child_node.guid) {
-                trace!("Not deduping remote child {}; already deduped",
+                trace!(self.driver, "Not deduping remote child {}; already deduped",
                        remote_child_node);
                 continue;
             }
@@ -1147,23 +1125,24 @@ impl <'t, D: Driver> Merger<'t, D> {
                     dupe_key_to_local_nodes.get_mut(remote_child_content)
                 {
                     if let Some(local_child_node) = local_nodes_for_key.pop_front() {
-                        trace!("Deduping local child {} to remote child {}",
+                        trace!(self.driver, "Deduping local child {} to remote child {}",
                                local_child_node,
                                remote_child_node);
                         local_to_remote.insert(local_child_node.guid.clone(), remote_child_node);
                         remote_to_local.insert(remote_child_node.guid.clone(), local_child_node);
                     } else {
-                        trace!("Not deduping remote child {}; no remaining local content matches",
+                        trace!(self.driver, "Not deduping remote child {}; no remaining local \
+                                content matches",
                                remote_child_node);
                         continue;
                     }
                 } else {
-                    trace!("Not deduping remote child {}; no local content matches",
+                    trace!(self.driver, "Not deduping remote child {}; no local content matches",
                            remote_child_node);
                     continue;
                 }
             } else {
-                trace!("Not deduping remote child {}; already merged",
+                trace!(self.driver, "Not deduping remote child {}; already merged",
                        remote_child_node);
             }
         }
@@ -1191,8 +1170,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                     let (local_to_remote, _) = matching_dupes_by_local_parent_guid
                     .entry(local_parent_node.guid.clone())
                     .or_insert_with(|| {
-                        trace!("First local child {} doesn't exist remotely; finding all \
-                                matching dupes in local {} and remote {}",
+                        trace!(self.driver, "First local child {} doesn't exist remotely; \
+                                finding all matching dupes in local {} and remote {}",
                                 local_child_node,
                                 local_parent_node,
                                 remote_parent_node);
@@ -1211,7 +1190,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                          matching_dupes_by_local_parent_guid);
             new_remote_node
         } else {
-            trace!("Merged node {} doesn't exist remotely; no potential dupes for local child {}",
+            trace!(self.driver, "Merged node {} doesn't exist remotely; no potential dupes for \
+                    local child {}",
                    merged_node,
                    local_child_node);
             None
@@ -1238,8 +1218,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                     let (_, remote_to_local) = matching_dupes_by_local_parent_guid
                     .entry(local_parent_node.guid.clone())
                     .or_insert_with(|| {
-                        trace!("First remote child {} doesn't exist locally; finding all \
-                                matching dupes in local {} and remote {}",
+                        trace!(self.driver, "First remote child {} doesn't exist locally; \
+                                finding all matching dupes in local {} and remote {}",
                                 remote_child_node,
                                 local_parent_node,
                                 remote_parent_node);
@@ -1258,7 +1238,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                          matching_dupes_by_local_parent_guid);
             new_local_node
         } else {
-            trace!("Merged node {} doesn't exist locally; no potential dupes for remote child {}",
+            trace!(self.driver, "Merged node {} doesn't exist locally; no potential dupes for \
+                    remote child {}",
                    merged_node,
                    remote_child_node);
             None

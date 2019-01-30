@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate env_logger;
+use std::collections::HashMap;
 
-use std::{collections::HashMap, sync::Once};
-
+use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
-use crate::merge::{Driver, Merger, StructureCounts};
+use crate::merge::{Merger, StructureCounts};
 use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
 #[derive(Debug)]
@@ -73,12 +72,7 @@ macro_rules! nodes {
     }};
 }
 
-fn before_each() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-                       env_logger::init();
-                   });
-}
+fn before_each() {}
 
 #[test]
 fn reparent_and_reposition() {
@@ -1845,7 +1839,7 @@ fn invalid_guids() {
     }).into_tree().unwrap();
     let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
-    let mut merger = Merger::with_driver(AllowInvalidGuids,
+    let mut merger = Merger::with_driver(&AllowInvalidGuids,
                                          &local_tree,
                                          &new_local_contents,
                                          &remote_tree,

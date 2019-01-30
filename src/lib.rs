@@ -13,8 +13,7 @@
 // limitations under the License.
 
 #[macro_use]
-extern crate log;
-
+mod driver;
 mod error;
 mod guid;
 mod merge;
@@ -24,6 +23,7 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
+pub use crate::driver::{DefaultDriver, Driver, LogLevel};
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 pub use crate::merge::{Deletion, Merger, StructureCounts};
