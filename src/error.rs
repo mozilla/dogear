@@ -14,8 +14,8 @@
 
 use std::{error, fmt, result, str::Utf8Error, string::FromUtf16Error};
 
-use guid::Guid;
-use tree::Kind;
+use crate::guid::Guid;
+use crate::tree::Kind;
 
 pub type Result<T> = result::Result<T, Error>;
 

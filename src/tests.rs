@@ -16,10 +16,10 @@ extern crate env_logger;
 
 use std::{collections::HashMap, sync::Once};
 
-use error::{ErrorKind, Result};
-use guid::{Guid, ROOT_GUID, UNFILED_GUID};
-use merge::{Driver, Merger, StructureCounts};
-use tree::{Content, Item, Kind, ParentGuidFrom, Tree};
+use crate::error::{ErrorKind, Result};
+use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
+use crate::merge::{Driver, Merger, StructureCounts};
+use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree};
 
 #[derive(Debug)]
 struct Node {

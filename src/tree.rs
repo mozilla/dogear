@@ -19,8 +19,8 @@ use std::{cmp::Ordering,
           ptr,
           slice};
 
-use error::{ErrorKind, Result};
-use guid::{Guid, ROOT_GUID, UNFILED_GUID, USER_CONTENT_ROOTS};
+use crate::error::{ErrorKind, Result};
+use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID, USER_CONTENT_ROOTS};
 
 /// The type for entry indices in the tree.
 type Index = usize;

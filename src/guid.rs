@@ -14,7 +14,7 @@
 
 use std::{fmt, str, ops};
 
-use error::{Result, ErrorKind};
+use crate::error::{Result, ErrorKind};
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Guid(Repr);

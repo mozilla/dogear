@@ -15,9 +15,9 @@
 use std::{collections::{HashMap, HashSet, VecDeque},
           mem};
 
-use error::{ErrorKind, Result};
-use guid::Guid;
-use tree::{Content, MergeState, MergedNode, Node, Tree};
+use crate::error::{ErrorKind, Result};
+use crate::guid::Guid;
+use crate::tree::{Content, MergeState, MergedNode, Node, Tree};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.

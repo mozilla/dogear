@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use error::{Error, ErrorKind};
-use guid::Guid;
-use merge::{Merger, Deletion};
-use tree::{Content, MergedNode, Tree};
+use crate::error::{Error, ErrorKind};
+use crate::guid::Guid;
+use crate::merge::{Merger, Deletion};
+use crate::tree::{Content, MergedNode, Tree};
 
 pub trait Store<E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
