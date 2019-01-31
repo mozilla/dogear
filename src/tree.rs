@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{cmp::Ordering,
-          collections::{HashMap, HashSet},
+          collections::{HashMap, HashSet, VecDeque},
           fmt,
           ops::Deref,
           ptr,
@@ -964,6 +964,18 @@ impl<'t> MergedNode<'t> {
                      merged_children: Vec::new(), }
     }
 
+    /// Iterates over the merged node's descendants in level order.
+    pub fn descendants(&self) -> impl Iterator<Item=Descendant> {
+        let mut nodes = VecDeque::with_capacity(1);
+        nodes.push_back(Descendant {
+            merged_parent_node: self,
+            level: 0,
+            position: 0,
+            merged_node: self,
+        });
+        DescendantsIterator(nodes).skip(1)
+    }
+
     pub fn remote_guid_changed(&self) -> bool {
         match self.merge_state {
             MergeState::Remote { remote_node, .. }
@@ -976,7 +988,7 @@ impl<'t> MergedNode<'t> {
     #[cfg(test)]
     pub fn into_tree(self) -> Result<Tree> {
         fn to_item(merged_node: &MergedNode) -> Item {
-            let node = merged_node.node();
+            let node = merged_node.merge_state.node();
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
             item.needs_merge = match merged_node.merge_state {
@@ -988,26 +1000,12 @@ impl<'t> MergedNode<'t> {
             item
         }
 
-        fn inflate<'t>(tree: &mut Tree,
-                       parent_guid: &Guid,
-                       merged_node: MergedNode<'t>)
-                       -> Result<()>
-        {
-            let guid = merged_node.guid.clone();
-            tree.insert(ParentGuidFrom::default()
-                            .children(parent_guid)
-                            .item(parent_guid),
-                        to_item(&merged_node).into())?;
-            for merged_child_node in merged_node.merged_children {
-                inflate(tree, &guid, merged_child_node)?;
-            }
-            Ok(())
-        }
-
-        let guid = self.guid.clone();
         let mut tree = Tree::new(to_item(&self));
-        for merged_child_node in self.merged_children {
-            inflate(&mut tree, &guid, merged_child_node)?;
+        for Descendant { merged_parent_node, merged_node, .. } in self.descendants() {
+            tree.insert(ParentGuidFrom::default()
+                            .children(&merged_parent_node.guid)
+                            .item(&merged_parent_node.guid),
+                        to_item(merged_node).into())?;
         }
         Ok(tree)
     }
@@ -1048,6 +1046,40 @@ impl<'t> MergedNode<'t> {
 impl<'t> fmt::Display for MergedNode<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.guid, self.merge_state)
+    }
+}
+
+/// A descendant holds a merged node, merged parent node, position in the
+/// merged parent, and level in the merged tree.
+#[derive(Clone, Copy, Debug)]
+pub struct Descendant<'t> {
+    pub merged_parent_node: &'t MergedNode<'t>,
+    pub level: usize,
+    pub position: usize,
+    pub merged_node: &'t MergedNode<'t>,
+}
+
+struct DescendantsIterator<'t>(VecDeque<Descendant<'t>>);
+
+impl<'t> Iterator for DescendantsIterator<'t> {
+    type Item = Descendant<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.pop_front()
+            .map(|Descendant { merged_parent_node, level, position, merged_node }| {
+                self.0.reserve(merged_node.merged_children.len());
+                for (child_position, merged_child_node) in
+                    merged_node.merged_children.iter().enumerate() {
+
+                    self.0.push_back(Descendant {
+                        merged_parent_node: &merged_node,
+                        level: level + 1,
+                        position: child_position,
+                        merged_node: merged_child_node,
+                    });
+                }
+                Descendant { merged_parent_node, level, position, merged_node }
+            })
     }
 }
 
