@@ -169,7 +169,7 @@ fn move_into_parent_sibling() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("menu________", Folder, {
+        ("menu________", Folder[needs_merge = true], {
             ("folderAAAAAA", Folder),
             ("folderCCCCCC", Folder, {
                 ("bookmarkBBBB", Bookmark)
@@ -429,7 +429,7 @@ fn newer_local_moves() {
             ("folderHHHHHH", Folder[needs_merge = true], {
                 ("bookmarkGGGG", Bookmark[needs_merge = true])
             }),
-            ("folderFFFFFF", Folder),
+            ("folderFFFFFF", Folder[needs_merge = true]),
             ("bookmarkEEEE", Bookmark[age = 10])
         }),
         ("unfiled_____", Folder[needs_merge = true], {
@@ -518,22 +518,22 @@ fn newer_remote_moves() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("menu________", Folder[age = 5], {
+        ("menu________", Folder[needs_merge = true, age = 5], {
             ("folderDDDDDD", Folder, {
                 ("bookmarkGGGG", Bookmark)
             })
         }),
-        ("toolbar_____", Folder[age = 5], {
+        ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("folderFFFFFF", Folder),
             ("bookmarkEEEE", Bookmark[age = 10]),
             ("folderHHHHHH", Folder, {
                 ("bookmarkCCCC", Bookmark)
             })
         }),
-        ("unfiled_____", Folder[age = 5], {
+        ("unfiled_____", Folder[needs_merge = true, age = 5], {
             ("folderBBBBBB", Folder)
         }),
-        ("mobile______", Folder[age = 5], {
+        ("mobile______", Folder[needs_merge = true, age = 5], {
             ("bookmarkAAAA", Bookmark)
         })
     }).into_tree().unwrap();
@@ -958,7 +958,7 @@ fn nonexistent_on_one_side() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = Tree::default();
+    let expected_tree = nodes!({}).into_tree().unwrap();
     let expected_deletions = vec![
         "bookmarkAAAA",
         "bookmarkBBBB",
@@ -1184,8 +1184,8 @@ fn deduping_local_newer() {
 
     let expected_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark),
-            ("bookmarkAAA4", Bookmark),
+            ("bookmarkAAAA", Bookmark[needs_merge = true]),
+            ("bookmarkAAA4", Bookmark[needs_merge = true]),
             ("bookmarkAAA3", Bookmark[needs_merge = true]),
             ("bookmarkAAA5", Bookmark)
         })
@@ -1299,7 +1299,7 @@ fn deduping_remote_newer() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("menu________", Folder[age = 5], {
+        ("menu________", Folder[needs_merge = true, age = 5], {
             ("folderAAAAAA", Folder[needs_merge = true], {
                 ("bookmarkBBBB", Bookmark[age = 10]),
                 ("bookmarkCCC1", Bookmark),
@@ -1411,12 +1411,12 @@ fn complex_deduping() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("menu________", Folder, {
+        ("menu________", Folder[needs_merge = true], {
             ("folderAAAAA1", Folder[needs_merge = true], {
                 ("bookmarkBBB1", Bookmark),
                 ("bookmarkCCCC", Bookmark[needs_merge = true, age = 10])
             }),
-            ("folderDDDDD1", Folder, {
+            ("folderDDDDD1", Folder[needs_merge = true], {
                 ("bookmarkEEE1", Bookmark)
             }),
             ("folderFFFFF1", Folder, {
@@ -1597,7 +1597,7 @@ fn applying_two_empty_folders_doesnt_smush() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder, {
+    let expected_tree = nodes!({
         ("mobile______", Folder, {
             ("emptyempty01", Folder),
             ("emptyempty02", Folder)
@@ -1653,7 +1653,7 @@ fn applying_two_empty_folders_matches_only_one() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("mobile______", Folder, {
+        ("mobile______", Folder[needs_merge = true], {
             ("emptyempty01", Folder),
             ("emptyempty02", Folder),
             ("emptyempty03", Folder)
@@ -1714,7 +1714,7 @@ fn deduping_ignores_parent_title() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("mobile______", Folder, {
+        ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark)
         })
     }).into_tree().unwrap();
@@ -1758,8 +1758,8 @@ fn mismatched_compatible_bookmark_kinds() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({
-        ("menu________", Folder, {
-            ("queryAAAAAAA", Query),
+        ("menu________", Folder[needs_merge = true], {
+            ("queryAAAAAAA", Query[needs_merge = true]),
             ("bookmarkBBBB", Query)
         })
     }).into_tree().unwrap();
@@ -1901,7 +1901,7 @@ fn multiple_parents() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder, {
+    let expected_tree = nodes!({
         ("toolbar_____", Folder[age = 5, needs_merge = true], {
             ("bookmarkBBBB", Bookmark)
         }),
