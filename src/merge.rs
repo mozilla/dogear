@@ -59,6 +59,7 @@ pub struct Deletion {
 }
 
 /// Indicates which side to take in case of a merge conflict.
+#[derive(Clone, Copy, Debug)]
 enum ConflictResolution {
     Local,
     Remote,
@@ -237,8 +238,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             new_guid
         };
 
-        let mut merged_node = MergedNode::new(merged_guid,
-                                              MergeState::Local { local_node, remote_node: None });
+        let mut merged_node = MergedNode::new(merged_guid, MergeState::LocalOnly(local_node));
         if local_node.is_folder() {
             // The local folder doesn't exist remotely, but its children might, so
             // we still need to recursively walk and merge them. This method will
@@ -272,8 +272,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             new_guid
         };
 
-        let mut merged_node = MergedNode::new(merged_guid,
-                                              MergeState::Remote { local_node: None, remote_node });
+        let mut merged_node = MergedNode::new(merged_guid, MergeState::RemoteOnly(remote_node));
         if remote_node.is_folder() {
             // As above, a remote folder's children might still exist locally, so we
             // need to merge them and update the merge state from remote to new if
@@ -317,15 +316,9 @@ impl <'t, D: Driver> Merger<'t, D> {
         let (item, children) = self.resolve_value_conflict(local_node, remote_node);
 
         let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
-            ConflictResolution::Local => {
-                MergeState::Local { local_node, remote_node: Some(remote_node) }
-            },
-            ConflictResolution::Remote => {
-                MergeState::Remote { local_node: Some(local_node), remote_node }
-            },
-            ConflictResolution::Unchanged => {
-                MergeState::Unchanged { local_node, remote_node }
-            },
+            ConflictResolution::Local => MergeState::Local { local_node, remote_node },
+            ConflictResolution::Remote => MergeState::Remote { local_node, remote_node },
+            ConflictResolution::Unchanged => MergeState::Unchanged { local_node, remote_node },
         });
 
         match children {
@@ -712,38 +705,44 @@ impl <'t, D: Driver> Merger<'t, D> {
                 (false, true) => (ConflictResolution::Local, ConflictResolution::Local),
                 _ => {
                     // The item changed locally and remotely.
-                    if local_node.age < remote_node.age {
+                    let newer_side = if local_node.age < remote_node.age {
                         // The local change is newer, so merge local children first,
                         // followed by remaining unmerged remote children.
-                        (ConflictResolution::Local, ConflictResolution::Local)
+                        ConflictResolution::Local
                     } else {
                         // The remote change is newer, so walk and merge remote
                         // children first, then remaining local children.
-                        if remote_node.is_user_content_root() {
-                            // Don't update root titles or other properties, but
-                            // use their newer remote structure.
-                            (ConflictResolution::Local, ConflictResolution::Remote)
-                        } else {
-                            (ConflictResolution::Remote, ConflictResolution::Remote)
-                        }
+                        ConflictResolution::Remote
+                    };
+                    if local_node.is_user_content_root() {
+                        // For roots, we always prefer the local side for item
+                        // changes, like the title (bug 1432614), but prefer the
+                        // newer side for children.
+                        (ConflictResolution::Local, newer_side)
+                    } else {
+                        // For all other items, we prefer the newer side for the
+                        // item and children.
+                        (newer_side, newer_side)
                     }
                 },
             },
 
             (true, false) => {
-                // The item changed locally, but not remotely. Keep the local
-                // state, then merge local children first, followed by remote
+                // The item changed locally, but not remotely. Prefer the local
+                // item, then merge local children first, followed by remote
                 // children.
                 (ConflictResolution::Local, ConflictResolution::Local)
             },
 
             (false, true) => {
-                // The item changed remotely, but not locally. Take the
-                // remote state, then merge remote children first, followed
-                // by local children.
-                if remote_node.is_user_content_root() {
-                    (ConflictResolution::Local, ConflictResolution::Remote)
+                // The item changed remotely, but not locally.
+                if local_node.is_user_content_root() {
+                    // For roots, we ignore remote item changes, but prefer
+                    // the remote side for children.
+                    (ConflictResolution::Unchanged, ConflictResolution::Remote)
                 } else {
+                    // For other items, we prefer the remote side for the item
+                    // and children.
                     (ConflictResolution::Remote, ConflictResolution::Remote)
                 }
             },
