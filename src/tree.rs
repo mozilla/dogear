@@ -224,14 +224,17 @@ impl Tree {
         Node(self, &self.entries[0])
     }
 
+    #[inline]
     pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
         self.deleted_guids.iter()
     }
 
+    #[inline]
     pub fn is_deleted(&self, guid: &Guid) -> bool {
         self.deleted_guids.contains(guid)
     }
 
+    #[inline]
     pub fn note_deleted(&mut self, guid: Guid) {
         self.deleted_guids.insert(guid);
     }
@@ -833,17 +836,20 @@ impl<'t> Node<'t> {
     }
 
     /// Indicates if this node is the root node.
+    #[inline]
     pub fn is_root(&self) -> bool {
         ptr::eq(self.entry(), &self.tree().entries[0])
     }
 
     /// Indicates if this node is a user content root.
+    #[inline]
     pub fn is_user_content_root(&self) -> bool {
         USER_CONTENT_ROOTS.contains(&self.entry().item.guid)
     }
 
     /// Indicates if this node is the default parent node for reparented
     /// orphans.
+    #[inline]
     pub fn is_default_parent_for_orphans(&self) -> bool {
         ptr::eq(self.entry(), &self.tree().entries[self.tree().reparent_orphans_to_default_index()])
     }
@@ -910,6 +916,7 @@ impl Item {
         self.kind == Kind::Folder
     }
 
+    #[inline]
     pub fn has_compatible_kind(&self, remote_node: &Item) -> bool {
         match (&self.kind, &remote_node.kind) {
             // Bookmarks and queries are interchangeable, as simply changing the URL
@@ -976,7 +983,7 @@ impl<'t> MergedNode<'t> {
         DescendantsIterator(nodes).skip(1)
     }
 
-    pub fn remote_guid_changed(&self) -> bool {
+    pub(crate) fn remote_guid_changed(&self) -> bool {
         self.merge_state.remote_node()
             .map(|remote_node| remote_node.guid != self.guid)
             .unwrap_or(false)
@@ -1049,17 +1056,18 @@ impl<'t> Iterator for DescendantsIterator<'t> {
     fn next(&mut self) -> Option<Self::Item> {
         self.0.pop_front()
             .map(|Descendant { merged_parent_node, level, position, merged_node }| {
-                self.0.reserve(merged_node.merged_children.len());
-                for (child_position, merged_child_node) in
-                    merged_node.merged_children.iter().enumerate() {
-
-                    self.0.push_back(Descendant {
-                        merged_parent_node: &merged_node,
-                        level: level + 1,
-                        position: child_position,
-                        merged_node: merged_child_node,
-                    });
-                }
+                self.0.extend(merged_node.merged_children
+                    .iter()
+                    .enumerate()
+                    .map(|(child_position, merged_child_node)| {
+                        Descendant {
+                            merged_parent_node: &merged_node,
+                            level: level + 1,
+                            position: child_position,
+                            merged_node: merged_child_node,
+                        }
+                    })
+                );
                 Descendant { merged_parent_node, level, position, merged_node }
             })
     }
@@ -1103,45 +1111,40 @@ pub enum MergeState<'t> {
 }
 
 impl<'t> MergeState<'t> {
-    pub fn local_node(&self) -> Option<Node<'t>> {
+    /// Returns the local node for the item, or `None` if the item only exists
+    /// remotely. The inverse of `remote_node()`.
+    pub fn local_node(&self) -> Option<&Node<'t>> {
         match self {
             MergeState::LocalOnly(local_node)
             | MergeState::Local { local_node, .. }
             | MergeState::Remote { local_node, .. }
             | MergeState::RemoteWithNewStructure { local_node, .. }
-            | MergeState::Unchanged { local_node, .. } => Some(*local_node),
+            | MergeState::Unchanged { local_node, .. } => Some(local_node),
 
             MergeState::RemoteOnly(_)
             | MergeState::RemoteOnlyWithNewStructure(_) => None,
         }
     }
 
-    pub fn remote_node(&self) -> Option<Node<'t>> {
+    /// Returns the remote node for the item, or `None` if the node only exists
+    /// locally. The inverse of `local_node()`.
+    pub fn remote_node(&self) -> Option<&Node<'t>> {
         match self {
             MergeState::RemoteOnly(remote_node)
             | MergeState::Local { remote_node, .. }
             | MergeState::Remote { remote_node, .. }
             | MergeState::RemoteOnlyWithNewStructure(remote_node)
             | MergeState::RemoteWithNewStructure { remote_node, .. }
-            | MergeState::Unchanged { remote_node, .. } => Some(*remote_node),
+            | MergeState::Unchanged { remote_node, .. } => Some(remote_node),
 
             MergeState::LocalOnly(_) => None,
         }
     }
 
-    pub fn should_upload(&self) -> bool {
-        match self {
-            MergeState::LocalOnly(_)
-            | MergeState::Local { .. }
-            | MergeState::RemoteOnlyWithNewStructure(_)
-            | MergeState::RemoteWithNewStructure { .. } => true,
-
-            MergeState::RemoteOnly(_)
-            | MergeState::Remote { .. }
-            | MergeState::Unchanged { .. } => false,
-        }
-    }
-
+    /// Returns `true` if the remote item should be inserted into or updated
+    /// in the local tree. This is not necessarily the inverse of
+    /// `should_upload()`, as remote items with new structure should be both
+    /// applied and reuploaded, and unchanged items should be neither.
     pub fn should_apply(&self) -> bool {
         match self {
             MergeState::RemoteOnly(_)
@@ -1155,7 +1158,23 @@ impl<'t> MergeState<'t> {
         }
     }
 
-    pub fn with_new_structure(&self) -> MergeState<'t> {
+    /// Returns `true` if the merged item should be (re)uploaded to the server.
+    pub fn should_upload(&self) -> bool {
+        match self {
+            MergeState::LocalOnly(_)
+            | MergeState::Local { .. }
+            | MergeState::RemoteOnlyWithNewStructure(_)
+            | MergeState::RemoteWithNewStructure { .. } => true,
+
+            MergeState::RemoteOnly(_)
+            | MergeState::Remote { .. }
+            | MergeState::Unchanged { .. } => false,
+        }
+    }
+
+    /// Returns a new merge state, indicating that the item has a new merged
+    /// structure that should be reuploaded to the server.
+    pub(crate) fn with_new_structure(&self) -> MergeState<'t> {
         match *self {
             MergeState::LocalOnly(local_node) => MergeState::LocalOnly(local_node),
             MergeState::RemoteOnly(remote_node)
@@ -1177,21 +1196,20 @@ impl<'t> MergeState<'t> {
         }
     }
 
-    /// Returns the preferred node. This method is private because it's only
-    /// useful for building a `Tree` from a `MergedNode`. Other callers will
-    /// find `MergeState::local_node()` and `MergeState::remote_node()` more
-    /// useful, as that indicates _which_ tree the node comes from.
-    fn node(&self) -> Node<'t> {
+    /// Returns the node from the preferred side. Unlike `local_node()` and
+    /// `remote_node()`, this doesn't indicate which side, so it's only used
+    /// for logging and `into_tree()`.
+    fn node(&self) -> &Node<'t> {
         match self {
             MergeState::LocalOnly(local_node)
-            | MergeState::Local { local_node, .. } => *local_node,
+            | MergeState::Local { local_node, .. } => local_node,
 
             MergeState::RemoteOnly(remote_node)
             | MergeState::Remote { remote_node, .. }
             | MergeState::RemoteOnlyWithNewStructure(remote_node)
-            | MergeState::RemoteWithNewStructure { remote_node, .. } => *remote_node,
+            | MergeState::RemoteWithNewStructure { remote_node, .. } => remote_node,
 
-            MergeState::Unchanged { local_node, .. } => *local_node,
+            MergeState::Unchanged { local_node, .. } => local_node,
         }
     }
 }
