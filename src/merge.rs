@@ -17,7 +17,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
 
 use crate::driver::{DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
-use crate::guid::Guid;
+use crate::guid::{Guid, IsValid};
 use crate::tree::{Content, MergeState, MergedNode, Node, Tree};
 
 /// Structure change types, used to indicate if a node on one side is moved
@@ -228,7 +228,7 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         self.merged_guids.insert(local_node.guid.clone());
 
-        let merged_guid = if local_node.guid.valid() {
+        let merged_guid = if local_node.guid.is_valid() {
             local_node.guid.clone()
         } else {
             let new_guid = self.driver.generate_new_guid(&local_node.guid)?;
@@ -260,7 +260,7 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         self.merged_guids.insert(remote_node.guid.clone());
 
-        let merged_guid = if remote_node.guid.valid() {
+        let merged_guid = if remote_node.guid.is_valid() {
             remote_node.guid.clone()
         } else {
             let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
