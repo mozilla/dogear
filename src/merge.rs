@@ -805,6 +805,19 @@ impl <'t, D: Driver> Merger<'t, D> {
                                                        remote_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
+        if remote_node.is_user_content_root() {
+            if let Some(local_node) = self.local_tree.node_for_guid(&remote_node.guid) {
+                let local_parent_node =
+                    local_node.parent()
+                        .expect("Can't check for structure changes without local parent");
+                if remote_parent_node.guid != local_parent_node.guid {
+                    return Ok(StructureChange::Moved);
+                }
+                return Ok(StructureChange::Unchanged);
+            }
+            return Ok(StructureChange::Unchanged);
+        }
+
         if !remote_node.is_syncable() {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it from the server, even if it's syncable locally.
@@ -886,6 +899,19 @@ impl <'t, D: Driver> Merger<'t, D> {
                                                        local_node: Node<'t>)
                                                        -> Result<StructureChange>
     {
+        if local_node.is_user_content_root() {
+            if let Some(remote_node) = self.remote_tree.node_for_guid(&local_node.guid) {
+                let remote_parent_node =
+                    remote_node.parent()
+                               .expect("Can't check for structure changes without remote parent");
+                if remote_parent_node.guid != local_parent_node.guid {
+                    return Ok(StructureChange::Moved);
+                }
+                return Ok(StructureChange::Unchanged);
+            }
+            return Ok(StructureChange::Unchanged);
+        }
+
         if !local_node.is_syncable() {
             // If the local node is known to be non-syncable, we unconditionally
             // delete it from the local tree, even if it's syncable remotely.
@@ -916,9 +942,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                     return Ok(StructureChange::Moved);
                 }
                 return Ok(StructureChange::Unchanged);
-            } else {
-                return Ok(StructureChange::Unchanged);
             }
+            return Ok(StructureChange::Unchanged);
         }
 
         if local_node.needs_merge {
@@ -1074,6 +1099,9 @@ impl <'t, D: Driver> Merger<'t, D> {
         let mut dupe_key_to_local_nodes: HashMap<&Content, VecDeque<_>> = HashMap::new();
 
         for local_child_node in local_parent_node.children() {
+            if local_child_node.is_user_content_root() {
+                continue;
+            }
             if let Some(local_child_content) =
                 self.new_local_contents
                     .and_then(|contents| contents.get(&local_child_node.guid))

@@ -20,7 +20,7 @@ use std::{cmp::Ordering,
           slice};
 
 use crate::error::{ErrorKind, Result};
-use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID, USER_CONTENT_ROOTS};
+use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 
 /// The type for entry indices in the tree.
 type Index = usize;
@@ -280,6 +280,10 @@ impl Tree {
                                 .or_default();
                             child_indices.push(entry_index);
                         },
+                        EntryParentFrom::UserContentRoot => {
+                            let parent_entry = &mut self.entries[0];
+                            parent_entry.child_indices.push(entry_index);
+                        },
                     }
                 }
 
@@ -302,6 +306,7 @@ impl Tree {
                                 None => continue,
                             }
                         },
+                        EntryParentFrom::UserContentRoot => 0,
                     };
                     let parent_entry = &mut self.entries[parent_index];
                     parent_entry.divergence = Divergence::Diverged;
@@ -353,6 +358,10 @@ impl Tree {
                                         .or_default();
                                     child_indices.push(entry_index);
                                 },
+                                EntryParentFrom::UserContentRoot => {
+                                    let parent_entry = &mut self.entries[0];
+                                    parent_entry.child_indices.push(entry_index);
+                                },
                             }
                         }
 
@@ -378,6 +387,7 @@ impl Tree {
                                         None => continue,
                                     }
                                 },
+                                EntryParentFrom::UserContentRoot => 0,
                             };
                             let parent_entry = &mut self.entries[parent_index];
                             parent_entry.divergence = Divergence::Diverged;
@@ -440,14 +450,32 @@ impl Tree {
                         // Great! This is the happy path for valid trees.
                         Divergence::Consistent
                     };
-                    (divergence, EntryParents::One(EntryParentFrom::Children(parent_index)))
+                    if child.guid().is_user_content_root() && parent_index != 0 {
+                        // If we're adding a user content root, and it's not a child of the tree
+                        // root, mark it as diverged.
+                        (Divergence::Diverged, EntryParents::Many(vec![
+                            EntryParentFrom::UserContentRoot,
+                            EntryParentFrom::Children(parent_index)
+                        ]))
+                    } else {
+                        (divergence, EntryParents::One(EntryParentFrom::Children(parent_index)))
+                    }
                 } else {
                     // Otherwise, the item has a parent-child disagreement.
                     // Store both parents and mark it as diverged.
-                    (Divergence::Diverged, EntryParents::Many(vec![
-                        EntryParentFrom::Children(parent_index),
-                        EntryParentFrom::Item(from_item),
-                    ]))
+                    let parents_from = if child.guid().is_user_content_root() && parent_index != 0 {
+                        vec![
+                            EntryParentFrom::Children(parent_index),
+                            EntryParentFrom::Item(from_item),
+                            EntryParentFrom::UserContentRoot,
+                        ]
+                    } else {
+                        vec![
+                            EntryParentFrom::Children(parent_index),
+                            EntryParentFrom::Item(from_item),
+                        ]
+                    };
+                    (Divergence::Diverged, EntryParents::Many(parents_from))
                 }
             },
 
@@ -464,8 +492,15 @@ impl Tree {
                     return Err(ErrorKind::InvalidParent(child.guid().clone(),
                                                         parent_entry.item.guid.clone()).into());
                 }
-                (Divergence::Diverged,
-                 EntryParents::One(EntryParentFrom::Children(parent_index)))
+                let parents = if child.guid().is_user_content_root() && parent_index != 0 {
+                    EntryParents::Many(vec![
+                        EntryParentFrom::UserContentRoot,
+                        EntryParentFrom::Children(parent_index),
+                    ])
+                } else {
+                    EntryParents::One(EntryParentFrom::Children(parent_index))
+                };
+                (Divergence::Diverged, parents)
             },
 
             // The item isn't mentioned in a folder's `children`, but has a
@@ -478,11 +513,15 @@ impl Tree {
             // have a `parentid`. Fall back to the default folder for orphans
             // (rule 3), or the root (rule 4).
             ParentGuidFrom(None, None) => {
-                let parent_from = match &self.reparent_orphans_to {
-                    Some(parent_guid) => EntryParentFrom::Item(parent_guid.clone()),
-                    None => EntryParentFrom::Children(0),
-                };
-                (Divergence::Diverged, EntryParents::One(parent_from))
+                if child.guid().is_user_content_root() {
+                    (Divergence::Diverged, EntryParents::One(EntryParentFrom::UserContentRoot))
+                } else {
+                    let parent_from = match &self.reparent_orphans_to {
+                        Some(parent_guid) => EntryParentFrom::Item(parent_guid.clone()),
+                        None => EntryParentFrom::Children(0),
+                    };
+                    (Divergence::Diverged, EntryParents::One(parent_from))
+                }
             },
         })
     }
@@ -657,6 +696,9 @@ enum EntryParentFrom {
     /// GUID and not the index because the tree might not have an entry for the
     /// `parentid` yet.
     Item(Guid),
+
+    /// ...
+    UserContentRoot,
 }
 
 #[derive(Debug)]
@@ -713,6 +755,7 @@ impl<'t> Node<'t> {
                 let parent_index = match parent_from {
                     EntryParentFrom::Children(parent_index) => *parent_index,
                     EntryParentFrom::Item(guid) => self.tree().reparent_orphans_to_index(guid),
+                    EntryParentFrom::UserContentRoot => 0,
                 };
                 let parent_entry = &self.tree().entries[parent_index];
                 Some(Node(self.tree(), parent_entry))
@@ -724,6 +767,9 @@ impl<'t> Node<'t> {
                         // preferring parents from `children` over `parentid`
                         // (rule 1).
                         let (parent_index, other_parent_index) = match (a, b) {
+                            (EntryParentFrom::UserContentRoot, _) | (_, EntryParentFrom::UserContentRoot) => {
+                                return Ordering::Less;
+                            },
                             (EntryParentFrom::Children(_), EntryParentFrom::Item(_)) => {
                                 return Ordering::Less;
                             },
@@ -749,6 +795,7 @@ impl<'t> Node<'t> {
                             EntryParentFrom::Item(guid) => {
                                 self.tree().reparent_orphans_to_index(guid)
                             },
+                            EntryParentFrom::UserContentRoot => 0,
                         };
                         let parent_entry = &self.tree().entries[parent_index];
                         Node(self.tree(), parent_entry)
@@ -844,7 +891,7 @@ impl<'t> Node<'t> {
     /// Indicates if this node is a user content root.
     #[inline]
     pub fn is_user_content_root(&self) -> bool {
-        USER_CONTENT_ROOTS.contains(&self.entry().item.guid)
+        self.entry().item.guid.is_user_content_root()
     }
 
     /// Indicates if this node is the default parent node for reparented
