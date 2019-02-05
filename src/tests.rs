@@ -1989,3 +1989,128 @@ fn reparent_orphans() {
 
     assert_eq!(merger.telemetry(), &expected_telem);
 }
+
+#[test]
+fn deleted_user_content_roots() {
+    before_each();
+
+    let mut local_tree = nodes!({
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkAAAA", Bookmark[needs_merge = true])
+        })
+    }).into_tree().unwrap();
+    local_tree.note_deleted("mobile______".into());
+    local_tree.note_deleted("toolbar_____".into());
+
+    let mut remote_tree = nodes!({
+        ("mobile______", Folder[needs_merge = true], {
+            ("bookmarkBBBB", Bookmark[needs_merge = true])
+        })
+    }).into_tree().unwrap();
+    remote_tree.note_deleted("unfiled_____".into());
+    remote_tree.note_deleted("toolbar_____".into());
+
+    let mut merger = Merger::new(&local_tree,
+                                           &remote_tree);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = nodes!({
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkAAAA", Bookmark[needs_merge = true])
+        }),
+        ("mobile______", Folder, {
+            ("bookmarkBBBB", Bookmark)
+        })
+    }).into_tree().unwrap();
+    let expected_telem = StructureCounts {
+        remote_revives: 0,
+        local_deletes: 0,
+        local_revives: 0,
+        remote_deletes: 0,
+        dupes: 0,
+    };
+
+    let merged_tree = merged_root.into_tree().unwrap();
+    assert_eq!(merged_tree, expected_tree);
+
+    // TODO(lina): Remove invalid tombstones from both sides.
+    let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    assert_eq!(deletions, vec![Into::<Guid>::into("toolbar_____")]);
+
+    assert_eq!(merger.telemetry(), &expected_telem);
+}
+
+#[test]
+fn moved_user_content_roots() {
+    before_each();
+
+    let local_tree = nodes!({
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkAAAA", Bookmark[needs_merge = true]),
+            ("menu________", Folder[needs_merge = true], {
+                ("bookmarkBBBB", Bookmark[needs_merge = true]),
+                ("folderCCCCCC", Folder, {
+                    ("bookmarkDDDD", Bookmark),
+                    ("toolbar_____", Folder, {
+                        ("bookmarkEEEE", Bookmark)
+                    })
+                })
+            })
+        }),
+        ("mobile______", Folder, {
+            ("bookmarkFFFF", Bookmark)
+        })
+    }).into_tree().unwrap();
+
+    let remote_tree = nodes!({
+        ("mobile______", Folder[needs_merge = true], {
+            ("toolbar_____", Folder[needs_merge = true], {
+                ("bookmarkGGGG", Bookmark[needs_merge = true]),
+                ("bookmarkEEEE", Bookmark)
+            })
+        }),
+        ("menu________", Folder[needs_merge = true], {
+            ("bookmarkHHHH", Bookmark[needs_merge = true]),
+            ("unfiled_____", Folder[needs_merge = true], {
+                ("bookmarkIIII", Bookmark[needs_merge = true])
+            })
+        })
+    }).into_tree().unwrap();
+
+    let mut merger = Merger::new(&local_tree,
+                                 &remote_tree);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = nodes!({
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkIIII", Bookmark),
+            ("bookmarkAAAA", Bookmark[needs_merge = true])
+        }),
+         ("menu________", Folder[needs_merge = true], {
+            ("bookmarkHHHH", Bookmark),
+            ("bookmarkBBBB", Bookmark[needs_merge = true]),
+            ("folderCCCCCC", Folder[needs_merge = true], {
+                ("bookmarkDDDD", Bookmark[needs_merge = true])
+            })
+        }),
+        ("toolbar_____", Folder[needs_merge = true], {
+            ("bookmarkGGGG", Bookmark),
+            ("bookmarkEEEE", Bookmark)
+        }),
+        ("mobile______", Folder[needs_merge = true], {
+            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        })
+    }).into_tree().unwrap();
+    let expected_telem = StructureCounts::default();
+
+    let merged_tree = merged_root.into_tree().unwrap();
+    assert_eq!(merged_tree, expected_tree);
+
+    assert_eq!(merger.deletions().count(), 0);
+
+    assert_eq!(merger.telemetry(), &expected_telem);
+}
