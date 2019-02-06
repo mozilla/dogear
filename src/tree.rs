@@ -948,6 +948,7 @@ pub struct Item {
     pub kind: Kind,
     pub age: i64,
     pub needs_merge: bool,
+    pub validity: Validity,
 }
 
 impl Item {
@@ -955,7 +956,8 @@ impl Item {
         Item { guid,
                kind,
                age: 0,
-               needs_merge: false, }
+               needs_merge: false,
+               validity: Validity::Valid }
     }
 
     #[inline]
@@ -977,10 +979,14 @@ impl Item {
 
 impl fmt::Display for Item {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let kind = match self.validity {
+            Validity::Valid => format!("{}", self.kind),
+            Validity::Reupload | Validity::Replace => format!("{} ({})", self.kind, self.validity),
+        };
         let info = if self.needs_merge {
-            format!("{}; Age = {}ms; Unmerged", self.kind, self.age)
+            format!("{}; Age = {}ms; Unmerged", kind, self.age)
         } else {
-            format!("{}; Age = {}ms", self.kind, self.age)
+            format!("{}; Age = {}ms", kind, self.age)
         };
         write!(f, "{} ({})", self.guid, info)
     }
@@ -997,6 +1003,20 @@ pub enum Kind {
 }
 
 impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+/// Synced item validity.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Validity {
+    Valid,
+    Reupload,
+    Replace,
+}
+
+impl fmt::Display for Validity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
