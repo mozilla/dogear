@@ -18,7 +18,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
 use crate::driver::{DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, IsValid};
-use crate::tree::{Content, MergeState, MergedNode, Node, Tree};
+use crate::tree::{Content, MergeState, MergedNode, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -285,6 +285,12 @@ impl <'t, D: Driver> Merger<'t, D> {
             }
         }
 
+        if remote_node.diverged() || remote_node.validity != Validity::Valid {
+            // If the remote structure diverged, or the item isn't valid, flag it for
+            // reupload.
+            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+        }
+
         Ok(merged_node)
     }
 
@@ -351,6 +357,11 @@ impl <'t, D: Driver> Merger<'t, D> {
                                                             local_child_node)?;
                 }
             },
+        }
+
+        if remote_node.diverged() || remote_node.validity != Validity::Valid {
+            // Flag remotely diverged and invalid items for reupload.
+            merged_node.merge_state = merged_node.merge_state.with_new_structure();
         }
 
         Ok(merged_node)
@@ -429,10 +440,11 @@ impl <'t, D: Driver> Merger<'t, D> {
 
                 let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                remote_child_node)?;
-                if remote_child_node.diverged() || merged_node.remote_guid_changed() {
-                    // If the remote structure diverged, or the merged parent
-                    // GUID changed, flag the remote child for reupload so that
-                    // its `parentid` is correct.
+                if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
+                    // If either the parent's or child's GUID changed, flag both for reupload,
+                    // so that the server has a record for the new parent, the parent's
+                    // `children`, and the child's `parentid` are correct.
+                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
                     merged_child_node.merge_state =
                         merged_child_node.merge_state.with_new_structure();
                 }
@@ -473,7 +485,8 @@ impl <'t, D: Driver> Merger<'t, D> {
 
                     let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                    remote_child_node)?;
-                    if remote_child_node.diverged() || merged_node.remote_guid_changed() {
+                    if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
                         merged_child_node.merge_state =
                             merged_child_node.merge_state.with_new_structure();
                     }
@@ -501,8 +514,10 @@ impl <'t, D: Driver> Merger<'t, D> {
         } else {
             self.merge_remote_node(remote_child_node)
         }?;
-        if remote_child_node.diverged() || merged_node.remote_guid_changed() {
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+        if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
+            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_child_node.merge_state =
+                merged_child_node.merge_state.with_new_structure();
         }
         merged_node.merged_children.push(merged_child_node);
         Ok(())
@@ -619,9 +634,8 @@ impl <'t, D: Driver> Merger<'t, D> {
                         let mut merged_child_node = self.two_way_merge(local_child_node,
                                                                        remote_child_node)?;
                         merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        if remote_child_node.diverged() || merged_node.remote_guid_changed() {
-                            // ...But repositioning an item in a diverged folder, or in a folder
-                            // with an invalid GUID, should reupload the item.
+                        if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
+                            merged_node.merge_state = merged_node.merge_state.with_new_structure();
                             merged_child_node.merge_state =
                                 merged_child_node.merge_state.with_new_structure();
                         }
@@ -669,7 +683,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             // and merge.
             let mut merged_child_node = self.two_way_merge(local_child_node,
                                                            remote_child_node_by_content)?;
-            if remote_child_node_by_content.diverged() || merged_node.remote_guid_changed() {
+            if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
                 merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 merged_child_node.merge_state =
                     merged_child_node.merge_state.with_new_structure();
@@ -843,6 +857,17 @@ impl <'t, D: Driver> Merger<'t, D> {
                     }
                     return Ok(StructureChange::Deleted);
                 }
+                if local_node.validity == Validity::Replace {
+                    if remote_node.validity == Validity::Replace {
+                        // The nodes are invalid on both sides, so we can't apply or reupload
+                        // a valid copy. Delete the item from the server.
+                        self.delete_remotely.insert(remote_node.guid.clone());
+                        if remote_node.is_folder() {
+                            self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
+                        }
+                        return Ok(StructureChange::Deleted);
+                    }
+                }
                 let local_parent_node =
                     local_node.parent()
                               .expect("Can't check for structure changes without local parent");
@@ -853,6 +878,16 @@ impl <'t, D: Driver> Merger<'t, D> {
             } else {
                 return Ok(StructureChange::Unchanged);
             }
+        }
+
+        if remote_node.validity == Validity::Replace {
+            // If the remote node is invalid, and deleted locally, unconditionally
+            // delete the item from the server.
+            self.delete_remotely.insert(remote_node.guid.clone());
+            if remote_node.is_folder() {
+                self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
+            }
+            return Ok(StructureChange::Deleted);
         }
 
         if remote_node.needs_merge {
@@ -935,6 +970,19 @@ impl <'t, D: Driver> Merger<'t, D> {
                     }
                     return Ok(StructureChange::Deleted);
                 }
+                if remote_node.validity == Validity::Replace {
+                    if local_node.validity == Validity::Replace {
+                        // The nodes are invalid on both sides, so we can't apply or reupload
+                        // a valid copy. Delete the item from Places.
+                        self.delete_locally.insert(local_node.guid.clone());
+                        if local_node.is_folder() {
+                            self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
+                        }
+                        return Ok(StructureChange::Deleted);
+                    }
+                    // Otherwise, the remote node is invalid but the local node is valid,
+                    // so we can reupload a valid copy.
+                }
                 let remote_parent_node =
                     remote_node.parent()
                                .expect("Can't check for structure changes without remote parent");
@@ -944,6 +992,16 @@ impl <'t, D: Driver> Merger<'t, D> {
                 return Ok(StructureChange::Unchanged);
             }
             return Ok(StructureChange::Unchanged);
+        }
+
+        if local_node.validity == Validity::Replace {
+            // If the local node is invalid, and deleted remotely, unconditionally
+            // delete the item from Places.
+            self.delete_locally.insert(local_node.guid.clone());
+            if local_node.is_folder() {
+                self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
+            }
+            return Ok(StructureChange::Deleted);
         }
 
         if local_node.needs_merge {

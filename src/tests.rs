@@ -18,7 +18,7 @@ use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
-use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree};
+use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree, Validity};
 
 #[derive(Debug)]
 struct Node {
@@ -1955,12 +1955,14 @@ fn reparent_orphans() {
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
+        validity: Validity::Valid,
     }.into()).expect("Should insert orphan E");
     remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item {
         guid: "bookmarkFFFF".into(),
         kind: Kind::Bookmark,
         age: 0,
         needs_merge: true,
+        validity: Validity::Valid,
     }.into()).expect("Should insert orphan F");
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
