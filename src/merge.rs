@@ -714,31 +714,27 @@ impl <'t, D: Driver> Merger<'t, D> {
         }
 
         match (local_node.needs_merge, remote_node.needs_merge) {
-            (true, true) => match (local_node.diverged(), remote_node.diverged()) {
-                (true, false) => (ConflictResolution::Remote, ConflictResolution::Remote),
-                (false, true) => (ConflictResolution::Local, ConflictResolution::Local),
-                _ => {
-                    // The item changed locally and remotely.
-                    let newer_side = if local_node.age < remote_node.age {
-                        // The local change is newer, so merge local children first,
-                        // followed by remaining unmerged remote children.
-                        ConflictResolution::Local
-                    } else {
-                        // The remote change is newer, so walk and merge remote
-                        // children first, then remaining local children.
-                        ConflictResolution::Remote
-                    };
-                    if local_node.is_user_content_root() {
-                        // For roots, we always prefer the local side for item
-                        // changes, like the title (bug 1432614), but prefer the
-                        // newer side for children.
-                        (ConflictResolution::Local, newer_side)
-                    } else {
-                        // For all other items, we prefer the newer side for the
-                        // item and children.
-                        (newer_side, newer_side)
-                    }
-                },
+            (true, true) => {
+                // The item changed locally and remotely.
+                let newer_side = if local_node.age < remote_node.age {
+                    // The local change is newer, so merge local children first,
+                    // followed by remaining unmerged remote children.
+                    ConflictResolution::Local
+                } else {
+                    // The remote change is newer, so walk and merge remote
+                    // children first, then remaining local children.
+                    ConflictResolution::Remote
+                };
+                if local_node.is_user_content_root() {
+                    // For roots, we always prefer the local side for item
+                    // changes, like the title (bug 1432614), but prefer the
+                    // newer side for children.
+                    (ConflictResolution::Local, newer_side)
+                } else {
+                    // For all other items, we prefer the newer side for the
+                    // item and children.
+                    (newer_side, newer_side)
+                }
             },
 
             (true, false) => {
@@ -782,21 +778,17 @@ impl <'t, D: Driver> Merger<'t, D> {
         }
 
         match (local_parent_node.needs_merge, remote_parent_node.needs_merge) {
-            (true, true) => match (local_parent_node.diverged(), remote_parent_node.diverged()) {
-                (true, false) => ConflictResolution::Remote,
-                (false, true) => ConflictResolution::Local,
-                _ => {
-                    // If both parents changed, compare timestamps to decide where
-                    // to keep the local child.
-                    let latest_local_age = local_child_node.age.min(local_parent_node.age);
-                    let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
+            (true, true) => {
+                // If both parents changed, compare timestamps to decide where
+                // to keep the local child.
+                let latest_local_age = local_child_node.age.min(local_parent_node.age);
+                let latest_remote_age = remote_child_node.age.min(remote_parent_node.age);
 
-                    if latest_local_age < latest_remote_age {
-                        ConflictResolution::Local
-                    } else {
-                        ConflictResolution::Remote
-                    }
-                },
+                if latest_local_age < latest_remote_age {
+                    ConflictResolution::Local
+                } else {
+                    ConflictResolution::Remote
+                }
             },
 
             // If only the local or remote parent changed, keep the child in its
