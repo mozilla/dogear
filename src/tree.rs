@@ -19,6 +19,8 @@ use std::{cmp::Ordering,
           ops::Deref,
           ptr};
 
+use smallbitvec::SmallBitVec;
+
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID};
 
@@ -760,7 +762,7 @@ impl ResolvedParent {
 /// algorithm. Returns the index of the entry where the cycle was detected,
 /// or `None` if there aren't any cycles.
 fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
-    let mut seen = vec![false; parents.len()];
+    let mut seen = SmallBitVec::from_elem(parents.len(), false);
     for (entry_index, parent) in parents.iter().enumerate() {
         if seen[entry_index] {
             continue;
@@ -780,7 +782,7 @@ fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
                 .and_then(|index| parents[index].index())
                 .and_then(|index| parents[index].index());
         }
-        seen[entry_index] = true;
+        seen.set(entry_index, true);
     }
     None
 }
