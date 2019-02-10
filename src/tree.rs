@@ -448,6 +448,9 @@ impl IntoTree for Builder {
         // a vector of resolved parents, and a lookup table for reparented
         // orphaned children.
         let (parents, mut reparented_orphans_by_parent) = self.resolve();
+        if let Some(index) = detect_cycles(&parents) {
+            return Err(ErrorKind::Cycle(self.entries[index].item.guid.clone()).into());
+        }
         for reparented_orphans in reparented_orphans_by_parent.values_mut() {
             // Use a deterministic order for reparented orphans.
             reparented_orphans.sort_unstable_by(|&index, &other_index| {
@@ -740,6 +743,46 @@ enum ResolvedParent {
     Unchanged(Index),
     ByChildren(Index),
     ByParentGuid(Index),
+}
+
+impl ResolvedParent {
+    fn index(&self) -> Option<Index> {
+        match self {
+            ResolvedParent::Root => None,
+            ResolvedParent::Unchanged(index)
+            | ResolvedParent::ByChildren(index)
+            | ResolvedParent::ByParentGuid(index) => Some(*index),
+        }
+    }
+}
+
+/// Detects cycles in resolved parents, using Floyd's tortoise and the hare
+/// algorithm. Returns the index of the entry where the cycle was detected,
+/// or `None` if there aren't any cycles.
+fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
+    let mut seen = vec![false; parents.len()];
+    for (entry_index, parent) in parents.iter().enumerate() {
+        if seen[entry_index] {
+            continue;
+        }
+        let mut parent_index = parent.index();
+        let mut grandparent_index = parent.index()
+            .and_then(|index| parents[index].index());
+        while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
+            if i == j {
+                return Some(i);
+            }
+            if seen[i] || seen[j] {
+                break;
+            }
+            parent_index = parent_index.and_then(|index| parents[index].index());
+            grandparent_index = grandparent_index
+                .and_then(|index| parents[index].index())
+                .and_then(|index| parents[index].index());
+        }
+        seen[entry_index] = true;
+    }
+    None
 }
 
 #[derive(Debug)]

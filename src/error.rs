@@ -76,6 +76,9 @@ impl fmt::Display for Error {
                 write!(f, "Can't insert item {} into nonexistent parent {}",
                        child_guid, parent_guid)
             },
+            ErrorKind::Cycle(guid) => {
+                write!(f, "Item {} can't contain itself", guid)
+            },
             ErrorKind::MergeConflict => {
                 write!(f, "Local tree changed during merge")
             },
@@ -103,6 +106,7 @@ pub enum ErrorKind {
     InvalidParent(Guid, Guid),
     MissingParent(Guid, Guid),
     MissingItem(Guid),
+    Cycle(Guid),
     MergeConflict,
     UnmergedLocalItems,
     UnmergedRemoteItems,

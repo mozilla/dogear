@@ -2232,3 +2232,28 @@ fn moved_user_content_roots() {
 
     assert_eq!(&merger.structure_counts, &expected_telem);
 }
+
+#[test]
+fn cycle() {
+    before_each();
+
+    // Try to create a cycle: move A into B, and B into the menu, but keep
+    // B's parent by children as A.
+    let mut b = nodes!({
+        ("menu________", Folder)
+    }).into_builder().unwrap();
+
+    b.item(Item::new("folderAAAAAA".into(), Kind::Folder))
+     .and_then(|p| p.by_parent_guid("folderBBBBBB".into()))
+     .expect("Should insert A");
+
+    b.item(Item::new("folderBBBBBB".into(), Kind::Folder))
+     .and_then(|p| p.by_parent_guid("menu________".into()))
+     .and_then(|b| b.parent_for(&"folderBBBBBB".into()).by_children(&"folderAAAAAA".into()))
+     .expect("Should insert B");
+
+    match b.into_tree().expect_err("Should not build tree with cycles").kind() {
+        ErrorKind::Cycle(guid) => assert_eq!(guid, &Guid::from("folderAAAAAA")),
+        err @ _ => assert!(false, "Wrong error kind for cycle: {:?}", err),
+    }
+}
