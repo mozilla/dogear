@@ -18,7 +18,7 @@ use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
-use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree, Validity};
+use crate::tree::{Content, IntoTree, Item, Kind, Tree, Builder, Validity};
 
 #[derive(Debug)]
 struct Node {
@@ -31,25 +31,35 @@ impl Node {
         Node { item, children: Vec::new() }
     }
 
-    fn into_tree(self) -> Result<Tree> {
-        fn inflate(tree: &mut Tree, parent_guid: &Guid, node: Node) -> Result<()> {
+    fn into_builder(self) -> Result<Builder> {
+        fn inflate(b: &mut Builder, parent_guid: &Guid, node: Node) -> Result<()> {
             let guid = node.item.guid.clone();
-            tree.insert(ParentGuidFrom::default()
-                            .children(&parent_guid)
-                            .item(&parent_guid),
-                        node.item.into())?;
+            b.item(node.item)
+                .map(|_| ())
+                .or_else(|err| match err.kind() {
+                    ErrorKind::DuplicateItem(_) => Ok(()),
+                    _ => Err(err),
+                })?;
+            b.parent_for(&guid).by_structure(&parent_guid)?;
             for child in node.children {
-                inflate(tree, &guid, *child)?;
+                inflate(b, &guid, *child)?;
             }
             Ok(())
         }
 
         let guid = self.item.guid.clone();
-        let mut tree = Tree::with_reparenting(self.item, &UNFILED_GUID);
+        let mut builder = Tree::with_root(self.item);
+        builder.reparent_orphans_to(&UNFILED_GUID);
         for child in self.children {
-            inflate(&mut tree, &guid, *child)?;
+            inflate(&mut builder, &guid, *child)?;
         }
-        Ok(tree)
+        Ok(builder)
+    }
+}
+
+impl IntoTree for Node {
+    fn into_tree(self) -> Result<Tree> {
+        self.into_builder()?.into_tree()
     }
 }
 
@@ -2031,7 +2041,7 @@ fn reparent_orphans() {
         })
     }).into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = nodes!({
         ("toolbar_____", Folder[needs_merge = true], {
             ("bookmarkBBBB", Bookmark),
             ("bookmarkAAAA", Bookmark)
@@ -2040,21 +2050,28 @@ fn reparent_orphans() {
             ("bookmarkDDDD", Bookmark[needs_merge = true]),
             ("bookmarkCCCC", Bookmark)
         })
-    }).into_tree().unwrap();
-    remote_tree.insert(ParentGuidFrom::default().item(&"toolbar_____".into()), Item {
-        guid: "bookmarkEEEE".into(),
-        kind: Kind::Bookmark,
-        age: 0,
-        needs_merge: true,
-        validity: Validity::Valid,
-    }.into()).expect("Should insert orphan E");
-    remote_tree.insert(ParentGuidFrom::default().item(&"nonexistent".into()), Item {
-        guid: "bookmarkFFFF".into(),
-        kind: Kind::Bookmark,
-        age: 0,
-        needs_merge: true,
-        validity: Validity::Valid,
-    }.into()).expect("Should insert orphan F");
+    }).into_builder().unwrap();
+    remote_tree_builder
+        .item(Item {
+            guid: "bookmarkEEEE".into(),
+            kind: Kind::Bookmark,
+            age: 0,
+            needs_merge: true,
+            validity: Validity::Valid,
+        })
+        .and_then(|p| p.by_parent_guid("toolbar_____".into()))
+        .expect("Should insert orphan E");
+    remote_tree_builder
+        .item(Item {
+            guid: "bookmarkFFFF".into(),
+            kind: Kind::Bookmark,
+            age: 0,
+            needs_merge: true,
+            validity: Validity::Valid,
+        })
+        .and_then(|p| p.by_parent_guid("nonexistent".into()))
+        .expect("Should insert orphan F");
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -2188,19 +2205,19 @@ fn moved_user_content_roots() {
             ("bookmarkIIII", Bookmark),
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         }),
-         ("menu________", Folder[needs_merge = true], {
-            ("bookmarkHHHH", Bookmark),
-            ("bookmarkBBBB", Bookmark[needs_merge = true]),
-            ("folderCCCCCC", Folder[needs_merge = true], {
-                ("bookmarkDDDD", Bookmark[needs_merge = true])
-            })
+        ("mobile______", Folder[needs_merge = true], {
+            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        }),
+        ("menu________", Folder[needs_merge = true], {
+           ("bookmarkHHHH", Bookmark),
+           ("bookmarkBBBB", Bookmark[needs_merge = true]),
+           ("folderCCCCCC", Folder[needs_merge = true], {
+               ("bookmarkDDDD", Bookmark[needs_merge = true])
+           })
         }),
         ("toolbar_____", Folder[needs_merge = true], {
             ("bookmarkGGGG", Bookmark),
             ("bookmarkEEEE", Bookmark)
-        }),
-        ("mobile______", Folder[needs_merge = true], {
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
     let expected_telem = StructureCounts {

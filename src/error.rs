@@ -65,6 +65,9 @@ impl fmt::Display for Error {
             ErrorKind::DuplicateItem(guid) => {
                 write!(f, "Item {} already exists in tree", guid)
             },
+            ErrorKind::MissingItem(guid) => {
+                write!(f, "Item {} doesn't exist in tree", guid)
+            },
             ErrorKind::InvalidParent(child_guid, parent_guid) => {
                 write!(f, "Can't insert item {} into non-folder {}",
                        child_guid, parent_guid)
@@ -99,6 +102,7 @@ pub enum ErrorKind {
     DuplicateItem(Guid),
     InvalidParent(Guid, Guid),
     MissingParent(Guid, Guid),
+    MissingItem(Guid),
     MergeConflict,
     UnmergedLocalItems,
     UnmergedRemoteItems,
