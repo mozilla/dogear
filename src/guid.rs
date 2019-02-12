@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, str, ops};
+use std::{cmp::Ordering, fmt, hash::{Hash, Hasher}, str, ops};
 
 use crate::error::{Result, ErrorKind};
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone)]
 pub struct Guid(Repr);
 
 /// Indicates if the GUID is valid. Implemented for byte slices and GUIDs.
@@ -28,7 +28,7 @@ pub trait IsValidGuid {
 /// only Base64url characters; we can store them on the stack without a heap
 /// allocation. However, both local and remote items might have invalid GUIDs,
 /// in which case we fall back to a heap-allocated string.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone)]
 enum Repr {
     Fast([u8; 12]),
     Slow(String),
@@ -179,11 +179,38 @@ impl ops::Deref for Guid {
     }
 }
 
+impl Ord for Guid {
+    fn cmp(&self, other: &Guid) -> Ordering {
+        self.as_bytes().cmp(other.as_bytes())
+    }
+}
+
+impl PartialOrd for Guid {
+    fn partial_cmp(&self, other: &Guid) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 // Allow direct comparison with str
 impl PartialEq<str> for Guid {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         PartialEq::eq(self.as_str(), other)
+    }
+}
+
+impl PartialEq for Guid {
+    #[inline]
+    fn eq(&self, other: &Guid) -> bool {
+        self.as_bytes().eq(other.as_bytes())
+    }
+}
+
+impl Eq for Guid {}
+
+impl Hash for Guid {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
     }
 }
 
