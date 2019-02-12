@@ -20,8 +20,8 @@ use crate::error::{Result, ErrorKind};
 pub struct Guid(Repr);
 
 /// Indicates if the GUID is valid. Implemented for byte slices and GUIDs.
-pub trait IsValid {
-    fn is_valid(&self) -> bool;
+pub trait IsValidGuid {
+    fn is_valid_guid(&self) -> bool;
 }
 
 /// The internal representation of a GUID. Valid GUIDs are 12 bytes, and contain
@@ -62,7 +62,7 @@ const VALID_GUID_BYTES: [u8; 255] =
 
 impl Guid {
     pub fn from_utf8(b: &[u8]) -> Result<Guid> {
-        let repr = if b.is_valid() {
+        let repr = if b.is_valid_guid() {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(b);
             Repr::Fast(bytes)
@@ -76,7 +76,7 @@ impl Guid {
     }
 
     pub fn from_utf16(b: &[u16]) -> Result<Guid> {
-        let repr = if b.is_valid() {
+        let repr = if b.is_valid_guid() {
             let mut bytes = [0u8; 12];
             for (index, &byte) in b.iter().enumerate() {
                 if byte > u16::from(u8::max_value()) {
@@ -121,9 +121,9 @@ impl Guid {
     }
 }
 
-impl IsValid for Guid {
+impl IsValidGuid for Guid {
     #[inline]
-    fn is_valid(&self) -> bool {
+    fn is_valid_guid(&self) -> bool {
         match self.0 {
             Repr::Fast(_) => true,
             Repr::Slow(_) => false,
@@ -131,10 +131,10 @@ impl IsValid for Guid {
     }
 }
 
-impl<T: Copy + Into<usize>> IsValid for [T] {
+impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
-    fn is_valid(&self) -> bool {
+    fn is_valid_guid(&self) -> bool {
         self.len() == 12 && self.iter().all(|&byte| {
             VALID_GUID_BYTES.get(byte.into()).map(|&b| b == 1).unwrap_or(false)
         })
@@ -144,7 +144,7 @@ impl<T: Copy + Into<usize>> IsValid for [T] {
 impl<'a> From<&'a str> for Guid {
     #[inline]
     fn from(s: &'a str) -> Guid {
-        let repr = if s.as_bytes().is_valid() {
+        let repr = if s.as_bytes().is_valid_guid() {
             assert!(s.is_char_boundary(12));
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(s.as_bytes());
@@ -211,14 +211,14 @@ mod tests {
                             "__folderBB__",
                             "queryAAAAAAA"];
         for guid in valid_guids {
-            assert!(guid.as_bytes().is_valid(),
+            assert!(guid.as_bytes().is_valid_guid(),
                     "{:?} should validate",
                     guid);
         }
 
         let invalid_guids = &["bookmarkAAA", "folder!", "b@dgu1d!"];
         for guid in invalid_guids {
-            assert!(!guid.as_bytes().is_valid(),
+            assert!(!guid.as_bytes().is_valid_guid(),
                     "{:?} should not validate",
                     guid);
         }
@@ -226,7 +226,7 @@ mod tests {
         let invalid_guid_bytes: &[[u8; 12]] =
             &[[113, 117, 101, 114, 121, 65, 225, 193, 65, 65, 65, 65]];
         for bytes in invalid_guid_bytes {
-            assert!(!bytes.is_valid(), "{:?} should not validate", bytes);
+            assert!(!bytes.is_valid_guid(), "{:?} should not validate", bytes);
         }
     }
 }
