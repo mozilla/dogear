@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::driver::{LogLevel, Driver};
+use crate::driver::{LogLevel, Driver, Stats, Timing, Counter};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Merger, Deletion};
@@ -47,20 +47,30 @@ pub trait Store<D: Driver, E: From<Error>> {
     fn apply<'t>(&mut self, descendants: Vec<MergedDescendant<'t>>,
                  deletions: Vec<Deletion>) -> Result<(), E>;
 
-    fn merge(&mut self, driver: &D, local_time_millis: i64,
+    fn merge(&mut self, driver: &D, stats: &mut Stats, local_time_millis: i64,
              remote_time_millis: i64) -> Result<(), E> {
 
-        let local_tree = self.fetch_local_tree(local_time_millis)?;
+        let local_tree = stats
+            .time(Timing::FetchLocalTree)
+            .record(|| self.fetch_local_tree(local_time_millis))?;
         trace!(driver, "Built local tree from mirror\n{}", local_tree);
-        let new_local_contents = self.fetch_new_local_contents()?;
 
-        let remote_tree = self.fetch_remote_tree(remote_time_millis)?;
+        let new_local_contents = stats
+            .time(Timing::FetchNewLocalContents)
+            .record(|| self.fetch_new_local_contents())?;
+
+        let remote_tree = stats
+            .time(Timing::FetchRemoteTree)
+            .record(|| self.fetch_remote_tree(remote_time_millis))?;
         trace!(driver, "Built remote tree from mirror\n{}", remote_tree);
-        let new_remote_contents = self.fetch_new_remote_contents()?;
+
+        let new_remote_contents = stats
+            .time(Timing::FetchNewRemoteContents)
+            .record(|| self.fetch_new_remote_contents())?;
 
         let mut merger = Merger::with_driver(driver, &local_tree, &new_local_contents,
                                              &remote_tree, &new_remote_contents);
-        let merged_root = merger.merge()?;
+        let merged_root = stats.time(Timing::Merge).record(|| merger.merge())?;
         if driver.log_level() >= LogLevel::Trace {
             let delete_locally = merger
                 .delete_locally
@@ -77,6 +87,17 @@ pub trait Store<D: Driver, E: From<Error>> {
             trace!(driver, "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
                    merged_root.to_ascii_string(), delete_locally, delete_remotely);
         }
+        stats
+            .count(Counter::RemoteRevives)
+            .set(merger.structure_counts.remote_revives)
+            .count(Counter::LocalDeletes)
+            .set(merger.structure_counts.local_deletes)
+            .count(Counter::LocalRevives)
+            .set(merger.structure_counts.local_revives)
+            .count(Counter::RemoteDeletes)
+            .set(merger.structure_counts.remote_deletes)
+            .count(Counter::Dupes)
+            .set(merger.structure_counts.dupes);
 
         if !merger.subsumes(&local_tree) {
             Err(E::from(ErrorKind::UnmergedLocalItems.into()))?;
@@ -87,7 +108,14 @@ pub trait Store<D: Driver, E: From<Error>> {
 
         let descendants = merged_root.descendants();
         let deletions = merger.deletions().collect::<Vec<_>>();
-        self.apply(descendants, deletions)?;
+        stats
+            .count(Counter::MergedNodes)
+            .set(descendants.len() as i64)
+            .count(Counter::MergedDeletions)
+            .set(deletions.len() as i64);
+        stats
+            .time(Timing::Apply)
+            .record(|| self.apply(descendants, deletions))?;
 
         Ok(())
     }

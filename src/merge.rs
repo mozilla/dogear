@@ -33,17 +33,17 @@ pub(crate) enum StructureChange {
 }
 
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
-pub struct StructureCounts {
+pub(crate) struct StructureCounts {
     /// Remote non-folder change wins over local deletion.
-    pub remote_revives: u64,
+    pub remote_revives: i64,
     /// Local folder deletion wins over remote change.
-    pub local_deletes: u64,
+    pub local_deletes: i64,
     /// Local non-folder change wins over remote deletion.
-    pub local_revives: u64,
+    pub local_revives: i64,
     /// Remote folder deletion wins over local change.
-    pub remote_deletes: u64,
+    pub remote_deletes: i64,
     /// Deduped local items.
-    pub dupes: u64,
+    pub dupes: i64,
 }
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for
@@ -98,7 +98,7 @@ pub struct Merger<'t, D = DefaultDriver> {
     merged_guids: HashSet<Guid>,
     pub(crate) delete_locally: HashSet<Guid>,
     pub(crate) delete_remotely: HashSet<Guid>,
-    structure_counts: StructureCounts,
+    pub(crate) structure_counts: StructureCounts,
 }
 
 impl<'t> Merger<'t, DefaultDriver> {
@@ -168,11 +168,6 @@ impl <'t, D: Driver> Merger<'t, D> {
         }
 
         Ok(merged_root_node)
-    }
-
-    #[inline]
-    pub fn telemetry(&self) -> &StructureCounts {
-        &self.structure_counts
     }
 
     #[inline]

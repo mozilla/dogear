@@ -139,7 +139,7 @@ fn reparent_and_reposition() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 // This test moves a bookmark that exists locally into a new folder that only
@@ -185,7 +185,7 @@ fn move_into_parent_sibling() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn reorder_and_insert() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn unchanged_newer_changed_older() {
     deletions.sort_unstable();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -448,7 +448,7 @@ fn newer_local_moves() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -546,7 +546,7 @@ fn newer_remote_moves() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -612,7 +612,7 @@ fn value_structure_conflict() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -678,7 +678,7 @@ fn complex_move_with_additions() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -775,7 +775,7 @@ fn complex_orphaning() {
     deletions.sort_unstable();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -867,7 +867,7 @@ fn locally_modified_remotely_deleted() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -940,7 +940,7 @@ fn locally_deleted_remotely_modified() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -974,7 +974,7 @@ fn nonexistent_on_one_side() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1052,7 +1052,7 @@ fn clear_folder_then_delete() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1136,7 +1136,7 @@ fn newer_move_to_deleted() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1205,7 +1205,7 @@ fn deduping_local_newer() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1329,7 +1329,7 @@ fn deduping_remote_newer() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1440,7 +1440,7 @@ fn complex_deduping() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1479,7 +1479,7 @@ fn left_pane_root() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1578,7 +1578,7 @@ fn non_syncable_items() {
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1612,7 +1612,7 @@ fn applying_two_empty_folders_doesnt_smush() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1674,7 +1674,7 @@ fn applying_two_empty_folders_matches_only_one() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 // Bug 747699: we should follow the hierarchy when merging, instead of
@@ -1733,7 +1733,7 @@ fn deduping_ignores_parent_title() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1772,7 +1772,7 @@ fn mismatched_compatible_bookmark_kinds() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1869,7 +1869,7 @@ fn invalid_guids() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1925,7 +1925,7 @@ fn multiple_parents() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -1991,7 +1991,7 @@ fn reparent_orphans() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -2043,7 +2043,7 @@ fn deleted_user_content_roots() {
     let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
     assert_eq!(deletions, vec![Into::<Guid>::into("toolbar_____")]);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
 
 #[test]
@@ -2116,5 +2116,5 @@ fn moved_user_content_roots() {
 
     assert_eq!(merger.deletions().count(), 0);
 
-    assert_eq!(merger.telemetry(), &expected_telem);
+    assert_eq!(&merger.structure_counts, &expected_telem);
 }
