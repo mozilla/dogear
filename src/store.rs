@@ -4,7 +4,7 @@ use crate::driver::{LogLevel, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Merger, Deletion};
-use crate::tree::{Content, MergedNode, Tree};
+use crate::tree::{Content, MergedDescendant, Tree};
 
 pub trait Store<D: Driver, E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
@@ -30,9 +30,8 @@ pub trait Store<D: Driver, E: From<Error>> {
     /// table, update Places, and stage outgoing items in another temp
     /// table. Afterward, we can inflate records on the JS side. On mobile,
     /// this flow might be simpler.
-    fn apply<T: Iterator<Item = Deletion>>(&mut self,
-                                           merged_root: &MergedNode,
-                                           deletions: T) -> Result<(), E>;
+    fn apply<'t>(&mut self, descendants: Vec<MergedDescendant<'t>>,
+                 deletions: Vec<Deletion>) -> Result<(), E>;
 
     fn merge(&mut self, driver: &D, local_time_millis: i64,
              remote_time_millis: i64) -> Result<(), E> {
@@ -59,7 +58,9 @@ pub trait Store<D: Driver, E: From<Error>> {
             Err(E::from(ErrorKind::UnmergedRemoteItems.into()))?;
         }
 
-        self.apply(&merged_root, merger.deletions())?;
+        let descendants = merged_root.descendants();
+        let deletions = merger.deletions().collect::<Vec<_>>();
+        self.apply(descendants, deletions)?;
 
         Ok(())
     }
