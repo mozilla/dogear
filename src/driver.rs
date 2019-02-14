@@ -62,7 +62,7 @@ pub enum LogLevel {
 macro_rules! trace {
     ($driver:expr, $($args:tt)+) => {
         if $driver.log_level() >= $crate::driver::LogLevel::Trace {
-            $driver.log($crate::driver::LogLevel::Trace, format_args!($($args)+))
+            $driver.log($crate::driver::LogLevel::Trace, format_args!($($args)+));
         }
     };
 }
@@ -71,7 +71,7 @@ macro_rules! trace {
 macro_rules! error {
     ($driver:expr, $($args:tt)+) => {
         if $driver.log_level() >= $crate::driver::LogLevel::Error {
-            $driver.log($crate::driver::LogLevel::Error, format_args!($($args)+))
+            $driver.log($crate::driver::LogLevel::Error, format_args!($($args)+));
         }
     };
 }
