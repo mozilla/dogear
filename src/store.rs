@@ -48,7 +48,20 @@ pub trait Store<D: Driver, E: From<Error>> {
                                              &remote_tree, &new_remote_contents);
         let merged_root = merger.merge()?;
         if driver.log_level() >= LogLevel::Trace {
-            trace!(driver, "Built new merged tree\n{}", merged_root.to_ascii_string());
+            let delete_locally = merger
+                .delete_locally
+                .iter()
+                .map(|guid| guid.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let delete_remotely = merger
+                .delete_remotely
+                .iter()
+                .map(|guid| guid.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            trace!(driver, "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
+                   merged_root.to_ascii_string(), delete_locally, delete_remotely);
         }
 
         if !merger.subsumes(&local_tree) {
