@@ -18,7 +18,7 @@ use std::{collections::{HashMap, HashSet, VecDeque},
 use crate::driver::{DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, IsValidGuid};
-use crate::tree::{Content, MergeState, MergedNode, Node, Tree, Validity};
+use crate::tree::{Content, Kind, MergeState, MergedNode, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -824,7 +824,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             return Ok(StructureChange::Unchanged);
         }
 
-        if !remote_node.is_syncable() {
+        if !remote_node_is_syncable(&remote_node) {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it from the server, even if it's syncable locally.
             self.delete_remotely.insert(remote_node.guid.clone());
@@ -951,7 +951,7 @@ impl <'t, D: Driver> Merger<'t, D> {
 
         if !self.remote_tree.is_deleted(&local_node.guid) {
             if let Some(remote_node) = self.remote_tree.node_for_guid(&local_node.guid) {
-                if !remote_node.is_syncable() {
+                if !remote_node_is_syncable(&remote_node) {
                     // The local node is syncable, but the remote node is non-syncable.
                     // This can happen if we applied an orphaned left pane query in a
                     // previous sync, and later saw the left pane root on the server.
@@ -1321,5 +1321,17 @@ impl <'t, D: Driver> Merger<'t, D> {
                    remote_child_node);
             None
         }
+    }
+}
+
+/// ...
+fn remote_node_is_syncable<'t>(remote_node: &Node) -> bool {
+    if !remote_node.is_syncable() {
+        return false;
+    }
+    match remote_node.kind {
+        Kind::Livemark => false,
+        Kind::Query if remote_node.diverged() => false,
+        _ => true
     }
 }
