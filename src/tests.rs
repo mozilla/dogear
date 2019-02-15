@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap};
 
 use crate::driver::Driver;
-use crate::error::{ErrorKind, Result};
+use crate::error::Result;
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
 use crate::tree::{Content, Item, Kind, ParentGuidFrom, Tree, Validity};
@@ -1777,28 +1777,69 @@ fn mismatched_compatible_bookmark_kinds() {
 fn mismatched_incompatible_bookmark_kinds() {
     before_each();
 
+    #[derive(Default)]
+    struct GenerateNewGuid(Cell<usize>);
+
+    impl Driver for GenerateNewGuid {
+        fn generate_new_guid(&self, old_guid: &Guid) -> Result<Guid> {
+            let count = self.0.get();
+            self.0.set(count + 1);
+            match old_guid.as_str() {
+                "bookmarkAAAA" => Ok(format!("item{:0>8}", count).into()),
+                _ => panic!("Didn't expect to generate new GUID for {}", old_guid),
+            }
+        }
+    }
+
     let local_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
+    let new_local_contents = HashMap::new();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Folder[needs_merge = true, age = 5])
+            ("bookmarkAAAA", Folder[needs_merge = true, age = 5], {
+                ("bookmarkBBBB", Bookmark[needs_merge = true]),
+                ("folderCCCCCC", Folder[needs_merge = true], {
+                    ("bookmarkDDDD", Bookmark[needs_merge = true])
+                })
+            })
         })
     }).into_tree().unwrap();
+    let new_remote_contents = HashMap::new();
 
-    let mut merger = Merger::new(&local_tree, &remote_tree);
-    match merger.merge() {
-        Ok(_) => panic!("Should not merge trees with mismatched kinds"),
-        Err(err) => {
-            match err.kind() {
-                ErrorKind::MismatchedItemKind { .. } => {},
-                kind => panic!("Got {:?} merging trees with mismatched kinds", kind)
-            };
-        }
-    };
+    let d = GenerateNewGuid::default();
+    let mut merger = Merger::with_driver(&d,
+                                         &local_tree,
+                                         &new_local_contents,
+                                         &remote_tree,
+                                         &new_remote_contents);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = nodes!({
+        ("menu________", Folder[needs_merge = true], {
+            ("item00000000", Bookmark[needs_merge = true]),
+            ("item00000001", Folder[needs_merge = true, age = 5], {
+                ("bookmarkBBBB", Bookmark[needs_merge = true]),
+                ("folderCCCCCC", Folder[needs_merge = true], {
+                    ("bookmarkDDDD", Bookmark)
+                })
+            })
+        })
+    }).into_tree().unwrap();
+    let expected_telem = StructureCounts::default();
+
+    let merged_tree = merged_root.into_tree().unwrap();
+    assert_eq!(merged_tree, expected_tree);
+
+    let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    assert_eq!(deletions, vec![Guid::from("bookmarkAAAA")]);
+
+    assert_eq!(merger.telemetry(), &expected_telem);
 }
 
 #[test]

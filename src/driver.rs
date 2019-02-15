@@ -54,6 +54,7 @@ impl Driver for DefaultDriver {}
 pub enum LogLevel {
     Silent,
     Error,
+    Warn,
     Trace,
     All,
 }
@@ -63,6 +64,15 @@ macro_rules! trace {
     ($driver:expr, $($args:tt)+) => {
         if $driver.log_level() >= $crate::driver::LogLevel::Trace {
             $driver.log($crate::driver::LogLevel::Trace, format_args!($($args)+));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($driver:expr, $($args:tt)+) => {
+        if $driver.log_level() >= $crate::driver::LogLevel::Warn {
+            $driver.log($crate::driver::LogLevel::Warn, format_args!($($args)+));
         }
     };
 }

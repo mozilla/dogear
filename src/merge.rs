@@ -66,6 +66,17 @@ enum ConflictResolution {
     Unchanged,
 }
 
+enum TwoWayMergeResult<'t> {
+    One(MergedNode<'t>),
+    Both(MergedNode<'t>, MergedNode<'t>),
+}
+
+impl<'t> From<MergedNode<'t>> for TwoWayMergeResult<'t> {
+    fn from(node: MergedNode<'t>) -> TwoWayMergeResult {
+        TwoWayMergeResult::One(node)
+    }
+}
+
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
 ///
@@ -149,7 +160,12 @@ impl <'t, D: Driver> Merger<'t, D> {
         let merged_root_node = {
             let local_root_node = self.local_tree.root();
             let remote_root_node = self.remote_tree.root();
-            self.two_way_merge(local_root_node, remote_root_node)?
+            match self.two_way_merge(local_root_node, remote_root_node)? {
+                TwoWayMergeResult::One(root) => root,
+                TwoWayMergeResult::Both(_, _) => {
+                    unreachable!("Can't keep multiple roots");
+                },
+            }
         };
 
         // Any remaining deletions on one side should be deleted on the other side.
@@ -223,7 +239,7 @@ impl <'t, D: Driver> Merger<'t, D> {
         self.delete_remotely.contains(guid)
     }
 
-    fn merge_local_node(&mut self, local_node: Node<'t>) -> Result<MergedNode<'t>> {
+    fn merge_local_only_node(&mut self, local_node: Node<'t>) -> Result<MergedNode<'t>> {
         trace!(self.driver, "Item {} only exists locally", local_node);
 
         self.merged_guids.insert(local_node.guid.clone());
@@ -231,58 +247,63 @@ impl <'t, D: Driver> Merger<'t, D> {
         let merged_guid = if local_node.guid.is_valid_guid() {
             local_node.guid.clone()
         } else {
+            warn!(self.driver, "Generating new GUID for local node {}", local_node);
             let new_guid = self.driver.generate_new_guid(&local_node.guid)?;
             if new_guid != local_node.guid {
+                if self.merged_guids.contains(&new_guid) {
+                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                }
                 self.merged_guids.insert(new_guid.clone());
             }
             new_guid
         };
 
         let mut merged_node = MergedNode::new(merged_guid, MergeState::LocalOnly(local_node));
-        if local_node.is_folder() {
-            // The local folder doesn't exist remotely, but its children might, so
-            // we still need to recursively walk and merge them. This method will
-            // change the merge state from local to new if any children were moved
-            // or deleted.
-            for local_child_node in local_node.children() {
-                self.merge_local_child_into_merged_node(&mut merged_node,
-                                                        local_node,
-                                                        None,
-                                                        local_child_node)?;
-            }
+
+        // The local folder doesn't exist remotely, but its children might, so
+        // we still need to recursively walk and merge them. This method will
+        // change the merge state from local to new if any children were moved
+        // or deleted.
+        for local_child_node in local_node.children() {
+            self.merge_local_child_into_merged_node(&mut merged_node,
+                                                    local_node,
+                                                    None,
+                                                    local_child_node)?;
         }
 
         Ok(merged_node)
     }
 
-    fn merge_remote_node(&mut self, remote_node: Node<'t>) -> Result<MergedNode<'t>> {
+    fn merge_remote_only_node(&mut self, remote_node: Node<'t>) -> Result<MergedNode<'t>> {
         trace!(self.driver, "Item {} only exists remotely", remote_node);
 
         self.merged_guids.insert(remote_node.guid.clone());
 
-        let merged_guid = if remote_node.guid.is_valid_guid() {
-            remote_node.guid.clone()
+        let mut merged_node = if remote_node.guid.is_valid_guid() {
+            MergedNode::new(remote_node.guid.clone(), MergeState::RemoteOnly(remote_node))
         } else {
+            warn!(self.driver, "Generating new GUID for remote node {}", remote_node);
             let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
-            if new_guid != remote_node.guid {
+            if new_guid == remote_node.guid {
+                MergedNode::new(new_guid, MergeState::RemoteOnly(remote_node))
+            } else {
+                if self.merged_guids.contains(&new_guid) {
+                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                }
                 self.merged_guids.insert(new_guid.clone());
-                // Upload tombstones for changed remote GUIDs.
                 self.delete_remotely.insert(remote_node.guid.clone());
+                MergedNode::new(new_guid, MergeState::RemoteOnlyWithNewStructure(remote_node))
             }
-            new_guid
         };
 
-        let mut merged_node = MergedNode::new(merged_guid, MergeState::RemoteOnly(remote_node));
-        if remote_node.is_folder() {
-            // As above, a remote folder's children might still exist locally, so we
-            // need to merge them and update the merge state from remote to new if
-            // any children were moved or deleted.
-            for remote_child_node in remote_node.children() {
-                self.merge_remote_child_into_merged_node(&mut merged_node,
-                                                         None,
-                                                         remote_node,
-                                                         remote_child_node)?;
-            }
+        // As above, a remote folder's children might still exist locally, so we
+        // need to merge them and update the merge state from remote to new if
+        // any children were moved or deleted.
+        for remote_child_node in remote_node.children() {
+            self.merge_remote_child_into_merged_node(&mut merged_node,
+                                                     None,
+                                                     remote_node,
+                                                     remote_child_node)?;
         }
 
         if remote_node.diverged() || remote_node.validity != Validity::Valid {
@@ -298,30 +319,56 @@ impl <'t, D: Driver> Merger<'t, D> {
     fn two_way_merge(&mut self,
                      local_node: Node<'t>,
                      remote_node: Node<'t>)
-                     -> Result<MergedNode<'t>>
+                     -> Result<TwoWayMergeResult<'t>>
     {
         trace!(self.driver, "Item exists locally as {} and remotely as {}",
                local_node,
                remote_node);
 
-        if !local_node.has_compatible_kind(&remote_node) {
-            // TODO(lina): Remove and replace items with mismatched kinds in
-            // `check_for_{}_structure_change_of_{}_node`.
-            error!(self.driver, "Merging local {} and remote {} with different kinds",
-                   local_node, remote_node);
-            return Err(ErrorKind::MismatchedItemKind(local_node.kind, remote_node.kind).into());
-        }
-
+        self.merged_guids.insert(local_node.guid.clone());
         self.merged_guids.insert(remote_node.guid.clone());
 
-        if local_node.guid != remote_node.guid {
-            // We deduped a NEW local item to a remote item.
-            self.merged_guids.insert(local_node.guid.clone());
+        if local_node.has_compatible_kind(&remote_node) {
+            self.merge_one_node(local_node, remote_node)
+        } else {
+            // For mismatched kinds, we keep both nodes with new GUIDs. This is
+            // an edge case: Places maintenance on Desktop can change an item's
+            // kind without changing its GUID (bug XXXXXXX), but this should be
+            // rare. In general, we can't meaningfully merge two items with
+            // different kinds (a bookmark and a folder with children?
+            // a bookmark and a separator?), so we keep both, with new
+            // structure, to avoid possible data loss.
+            warn!(self.driver, "Keeping both local {} and remote {} with different kinds",
+                  local_node, remote_node);
+            self.merge_both_nodes(local_node, remote_node)
         }
+    }
+
+    /// Takes the local or remote node, and recursively merges it with the node
+    /// from the other side.
+    fn merge_one_node(&mut self,
+                      local_node: Node<'t>,
+                      remote_node: Node<'t>)
+                      -> Result<TwoWayMergeResult<'t>>
+    {
+        let merged_guid = if remote_node.guid.is_valid_guid() {
+            remote_node.guid.clone()
+        } else {
+            warn!(self.driver, "Generating new valid GUID for remote node {}", remote_node);
+            let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
+            if new_guid != remote_node.guid {
+                if self.merged_guids.contains(&new_guid) {
+                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                }
+                self.merged_guids.insert(new_guid.clone());
+                self.delete_remotely.insert(remote_node.guid.clone());
+            }
+            new_guid
+        };
 
         let (item, children) = self.resolve_value_conflict(local_node, remote_node);
 
-        let mut merged_node = MergedNode::new(remote_node.guid.clone(), match item {
+        let mut merged_node = MergedNode::new(merged_guid, match item {
             ConflictResolution::Local => MergeState::Local { local_node, remote_node },
             ConflictResolution::Remote => MergeState::Remote { local_node, remote_node },
             ConflictResolution::Unchanged => MergeState::Unchanged { local_node, remote_node },
@@ -364,7 +411,49 @@ impl <'t, D: Driver> Merger<'t, D> {
             merged_node.merge_state = merged_node.merge_state.with_new_structure();
         }
 
-        Ok(merged_node)
+        Ok(merged_node.into())
+    }
+
+    /// Keeps both the local and remote nodes, with new GUIDs.
+    fn merge_both_nodes(&mut self,
+                        local_node: Node<'t>,
+                        remote_node: Node<'t>)
+                        -> Result<TwoWayMergeResult<'t>>
+    {
+        let new_local_guid = self.driver.generate_new_guid(&local_node.guid)?;
+        if self.merged_guids.contains(&new_local_guid) {
+            return Err(ErrorKind::DuplicateItem(new_local_guid).into());
+        }
+        self.merged_guids.insert(new_local_guid.clone());
+
+        let mut merged_local_node = MergedNode::new(new_local_guid,
+                                                    MergeState::LocalOnly(local_node));
+        for local_child_node in local_node.children() {
+            self.merge_local_child_into_merged_node(&mut merged_local_node,
+                                                    local_node,
+                                                    None,
+                                                    local_child_node)?;
+        }
+
+        let new_remote_guid = self.driver.generate_new_guid(&local_node.guid)?;
+        if self.merged_guids.contains(&new_remote_guid) {
+            return Err(ErrorKind::DuplicateItem(new_remote_guid).into());
+        }
+        // Delete the old GUID remotely, since we'll be reuploading the item
+        // with a new GUID.
+        self.delete_remotely.insert(remote_node.guid.clone());
+        self.merged_guids.insert(new_remote_guid.clone());
+
+        let mut merged_remote_node = MergedNode::new(new_remote_guid,
+            MergeState::RemoteOnlyWithNewStructure(remote_node));
+        for remote_child_node in remote_node.children() {
+            self.merge_remote_child_into_merged_node(&mut merged_remote_node,
+                                                     None,
+                                                     remote_node,
+                                                     remote_child_node)?;
+        }
+
+        Ok(TwoWayMergeResult::Both(merged_local_node, merged_remote_node))
     }
 
     /// Merges a remote child node into a merged folder node. This handles the
@@ -438,17 +527,30 @@ impl <'t, D: Driver> Merger<'t, D> {
                        remote_parent_node,
                        local_parent_node);
 
-                let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                               remote_child_node)?;
-                if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
-                    // If either the parent's or child's GUID changed, flag both for reupload,
-                    // so that the server has a record for the new parent, the parent's
-                    // `children`, and the child's `parentid` are correct.
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_child_node.merge_state =
-                        merged_child_node.merge_state.with_new_structure();
+                match self.two_way_merge(local_child_node, remote_child_node)? {
+                    TwoWayMergeResult::One(mut merged_child_node) => {
+                        if merged_node.remote_guid_changed() {
+                            // If the parent's GUID changed, flag the child for reupload, so that
+                            // its `parentid` is correct.
+                            merged_child_node.merge_state =
+                                merged_child_node.merge_state.with_new_structure();
+                        }
+                        if merged_child_node.remote_guid_changed() {
+                            // If the child's GUID changed, flag the parent for reupload, so that
+                            // its `children` are correct.
+                            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        }
+                        merged_node.merged_children.push(merged_child_node);
+                    },
+                    TwoWayMergeResult::Both(merged_local_child_node, merged_remote_child_node) => {
+                        // If we're keeping both children, flag the parent for reupload, so that
+                        // its `children` are correct. `two_way_merge` will flag the children for
+                        // reupload.
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        merged_node.merged_children.push(merged_local_child_node);
+                        merged_node.merged_children.push(merged_remote_child_node);
+                    },
                 }
-                merged_node.merged_children.push(merged_child_node);
                 return Ok(());
             }
 
@@ -483,14 +585,25 @@ impl <'t, D: Driver> Merger<'t, D> {
                            local_parent_node,
                            remote_parent_node);
 
-                    let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                                   remote_child_node)?;
-                    if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
-                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        merged_child_node.merge_state =
-                            merged_child_node.merge_state.with_new_structure();
+                    match self.two_way_merge(local_child_node, remote_child_node)? {
+                        TwoWayMergeResult::One(mut merged_child_node) => {
+                            if merged_node.remote_guid_changed() {
+                                merged_child_node.merge_state =
+                                    merged_child_node.merge_state.with_new_structure();
+                            }
+                            if merged_child_node.remote_guid_changed() {
+                                merged_node.merge_state =
+                                    merged_node.merge_state.with_new_structure();
+                            }
+                            merged_node.merged_children.push(merged_child_node);
+                        },
+                        TwoWayMergeResult::Both(merged_local_child_node,
+                                                merged_remote_child_node) => {
+                            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                            merged_node.merged_children.push(merged_local_child_node);
+                            merged_node.merged_children.push(merged_remote_child_node);
+                        },
                     }
-                    merged_node.merged_children.push(merged_child_node);
                 },
             }
 
@@ -510,14 +623,22 @@ impl <'t, D: Driver> Merger<'t, D> {
                                                       remote_parent_node,
                                                       remote_child_node)
         {
-            self.two_way_merge(local_child_node_by_content, remote_child_node)
+            match self.two_way_merge(local_child_node_by_content, remote_child_node)? {
+                TwoWayMergeResult::One(merged_child_node) => merged_child_node,
+                TwoWayMergeResult::Both(_, _) => {
+                    unreachable!("Deduping matched remote node to local node with different kind");
+                },
+            }
         } else {
-            self.merge_remote_node(remote_child_node)
-        }?;
-        if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            self.merge_remote_only_node(remote_child_node)?
+        };
+        if merged_node.remote_guid_changed() {
             merged_child_node.merge_state =
                 merged_child_node.merge_state.with_new_structure();
+        }
+        if merged_child_node.remote_guid_changed() {
+            merged_node.merge_state =
+                merged_node.merge_state.with_new_structure();
         }
         merged_node.merged_children.push(merged_child_node);
         Ok(())
@@ -590,11 +711,19 @@ impl <'t, D: Driver> Merger<'t, D> {
                 //
                 // However, older Desktop and Android use the child's `parentid` as
                 // canonical, while iOS is stricter and requires both to match.
-                let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                               remote_child_node)?;
+                match self.two_way_merge(local_child_node, remote_child_node)? {
+                    TwoWayMergeResult::One(mut merged_child_node) => {
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_structure();
+                        merged_node.merged_children.push(merged_child_node);
+                    },
+                    TwoWayMergeResult::Both(merged_local_child_node,
+                                            merged_remote_child_node) => {
+                        merged_node.merged_children.push(merged_local_child_node);
+                        merged_node.merged_children.push(merged_remote_child_node);
+                    },
+                }
                 merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
-                merged_node.merged_children.push(merged_child_node);
                 return Ok(());
             }
 
@@ -616,12 +745,19 @@ impl <'t, D: Driver> Merger<'t, D> {
 
                         // Merge and flag both the new parent and child for
                         // reupload. See above for why.
-                        let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                                       remote_child_node)?;
+                        match self.two_way_merge(local_child_node, remote_child_node)? {
+                            TwoWayMergeResult::One(mut merged_child_node) => {
+                                merged_child_node.merge_state =
+                                    merged_child_node.merge_state.with_new_structure();
+                                merged_node.merged_children.push(merged_child_node);
+                            },
+                            TwoWayMergeResult::Both(merged_local_child_node,
+                                                    merged_remote_child_node) => {
+                                merged_node.merged_children.push(merged_local_child_node);
+                                merged_node.merged_children.push(merged_remote_child_node);
+                            },
+                        }
                         merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        merged_child_node.merge_state =
-                            merged_child_node.merge_state.with_new_structure();
-                        merged_node.merged_children.push(merged_child_node);
                     } else {
                         trace!(self.driver, "Local child {} repositioned locally in {} and \
                                 remotely in {}; keeping child in newer local position",
@@ -631,15 +767,21 @@ impl <'t, D: Driver> Merger<'t, D> {
 
                         // For position changes in the same folder, we only need to
                         // merge and flag the parent for reupload.
-                        let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                                       remote_child_node)?;
-                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                        if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
-                            merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                            merged_child_node.merge_state =
-                                merged_child_node.merge_state.with_new_structure();
+                        match self.two_way_merge(local_child_node, remote_child_node)? {
+                            TwoWayMergeResult::One(mut merged_child_node) => {
+                                if merged_node.remote_guid_changed() {
+                                    merged_child_node.merge_state =
+                                        merged_child_node.merge_state.with_new_structure();
+                                }
+                                merged_node.merged_children.push(merged_child_node);
+                            },
+                            TwoWayMergeResult::Both(merged_local_child_node,
+                                                    merged_remote_child_node) => {
+                                merged_node.merged_children.push(merged_local_child_node);
+                                merged_node.merged_children.push(merged_remote_child_node);
+                            },
                         }
-                        merged_node.merged_children.push(merged_child_node);
+                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
                     }
                 },
 
@@ -681,20 +823,27 @@ impl <'t, D: Driver> Merger<'t, D> {
         {
             // The local child has a remote content match, so take the remote GUID
             // and merge.
-            let mut merged_child_node = self.two_way_merge(local_child_node,
-                                                           remote_child_node_by_content)?;
-            if merged_node.remote_guid_changed() || merged_child_node.remote_guid_changed() {
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                merged_child_node.merge_state =
-                    merged_child_node.merge_state.with_new_structure();
+            match self.two_way_merge(local_child_node, remote_child_node_by_content)? {
+                TwoWayMergeResult::One(mut merged_child_node) => {
+                    if merged_node.remote_guid_changed() {
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_structure();
+                    }
+                    if merged_child_node.remote_guid_changed() {
+                        merged_node.merge_state =
+                            merged_node.merge_state.with_new_structure();
+                    }
+                    merged_child_node
+                },
+                TwoWayMergeResult::Both(_, _) => {
+                    unreachable!("Deduping matched local node to remote node with different kind");
+                },
             }
-            merged_child_node
         } else {
             // The local child doesn't exist remotely, so flag the merged parent and
             // new child for upload, and walk its descendants.
-            let mut merged_child_node = self.merge_local_node(local_child_node)?;
+            let mut merged_child_node = self.merge_local_only_node(local_child_node)?;
             merged_node.merge_state = merged_node.merge_state.with_new_structure();
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
             merged_child_node
         };
         merged_node.merged_children.push(merged_child_node);
@@ -1056,17 +1205,29 @@ impl <'t, D: Driver> Merger<'t, D> {
                            merged_node);
 
                     // Flag the new parent and moved remote orphan for reupload.
-                    let mut merged_orphan_node = if let Some(local_child_node) =
-                        self.local_tree.node_for_guid(&remote_child_node.guid)
-                    {
-                        self.two_way_merge(local_child_node, remote_child_node)
-                    } else {
-                        self.merge_remote_node(remote_child_node)
-                    }?;
+                    match self.local_tree.node_for_guid(&remote_child_node.guid) {
+                        Some(local_child_node) => {
+                            match self.two_way_merge(local_child_node, remote_child_node)? {
+                                TwoWayMergeResult::One(mut merged_orphan_node) => {
+                                    merged_orphan_node.merge_state =
+                                        merged_orphan_node.merge_state.with_new_structure();
+                                    merged_node.merged_children.push(merged_orphan_node);
+                                },
+                                TwoWayMergeResult::Both(merged_local_child_node,
+                                                        merged_remote_child_node) => {
+                                    merged_node.merged_children.push(merged_local_child_node);
+                                    merged_node.merged_children.push(merged_remote_child_node);
+                                },
+                            }
+                        },
+                        None => {
+                            let mut merged_orphan_node = self.merge_remote_only_node(remote_child_node)?;
+                            merged_orphan_node.merge_state =
+                                merged_orphan_node.merge_state.with_new_structure();
+                            merged_node.merged_children.push(merged_orphan_node);
+                        },
+                    }
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_orphan_node.merge_state =
-                        merged_orphan_node.merge_state.with_new_structure();
-                    merged_node.merged_children.push(merged_orphan_node);
                 },
             }
         }
@@ -1104,17 +1265,27 @@ impl <'t, D: Driver> Merger<'t, D> {
                            merged_node);
 
                     // Flag the new parent and moved local orphan for reupload.
-                    let mut merged_orphan_node = if let Some(remote_child_node) =
-                        self.remote_tree.node_for_guid(&local_child_node.guid)
-                    {
-                        self.two_way_merge(local_child_node, remote_child_node)
-                    } else {
-                        self.merge_local_node(local_child_node)
-                    }?;
+                    match self.remote_tree.node_for_guid(&local_child_node.guid) {
+                        Some(remote_child_node) => {
+                            match self.two_way_merge(local_child_node, remote_child_node)? {
+                                TwoWayMergeResult::One(mut merged_orphan_node) => {
+                                    merged_orphan_node.merge_state =
+                                        merged_orphan_node.merge_state.with_new_structure();
+                                    merged_node.merged_children.push(merged_orphan_node);
+                                },
+                                TwoWayMergeResult::Both(merged_local_child_node,
+                                                        merged_remote_child_node) => {
+                                    merged_node.merged_children.push(merged_local_child_node);
+                                    merged_node.merged_children.push(merged_remote_child_node);
+                                },
+                            }
+                        },
+                        None => {
+                            let mut merged_orphan_node = self.merge_local_only_node(local_child_node)?;
+                            merged_node.merged_children.push(merged_orphan_node);
+                        }
+                    }
                     merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_orphan_node.merge_state =
-                        merged_orphan_node.merge_state.with_new_structure();
-                    merged_node.merged_children.push(merged_orphan_node);
                 },
             }
         }

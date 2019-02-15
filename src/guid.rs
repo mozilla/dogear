@@ -141,6 +141,17 @@ impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     }
 }
 
+impl From<String> for Guid {
+    #[inline]
+    fn from(s: String) -> Guid {
+        if s.as_bytes().is_valid_guid() {
+            Guid::from(s.as_str())
+        } else {
+            Guid(Repr::Slow(s))
+        }
+    }
+}
+
 impl<'a> From<&'a str> for Guid {
     #[inline]
     fn from(s: &'a str) -> Guid {
