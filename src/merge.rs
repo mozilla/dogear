@@ -96,8 +96,8 @@ pub struct Merger<'t, D = DefaultDriver> {
     new_remote_contents: Option<&'t HashMap<Guid, Content>>,
     matching_dupes_by_local_parent_guid: HashMap<Guid, MatchingDupes<'t>>,
     merged_guids: HashSet<Guid>,
-    delete_locally: HashSet<Guid>,
-    delete_remotely: HashSet<Guid>,
+    pub(crate) delete_locally: HashSet<Guid>,
+    pub(crate) delete_remotely: HashSet<Guid>,
     structure_counts: StructureCounts,
 }
 
