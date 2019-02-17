@@ -132,7 +132,10 @@ fn reparent_and_reposition() {
             })
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 10,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -178,7 +181,10 @@ fn move_into_parent_sibling() {
             })
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 4,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -260,7 +266,10 @@ fn reorder_and_insert() {
             ("bookmarkHHHH", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 12,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -341,6 +350,8 @@ fn unchanged_newer_changed_older() {
         local_revives: 0,
         remote_deletes: 1,
         dupes: 0,
+        merged_nodes: 6,
+        merged_deletions: 2,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -441,7 +452,10 @@ fn newer_local_moves() {
             ("folderBBBBBB", Folder[needs_merge = true])
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 12,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -539,7 +553,10 @@ fn newer_remote_moves() {
             ("bookmarkAAAA", Bookmark)
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 12,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -605,7 +622,10 @@ fn value_structure_conflict() {
             })
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 6,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -671,7 +691,10 @@ fn complex_move_with_additions() {
             })
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 7,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -766,6 +789,8 @@ fn complex_orphaning() {
         local_revives: 0,
         remote_deletes: 1,
         dupes: 0,
+        merged_nodes: 7,
+        merged_deletions: 2,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -858,6 +883,8 @@ fn locally_modified_remotely_deleted() {
         local_revives: 0,
         remote_deletes: 1,
         dupes: 0,
+        merged_nodes: 7,
+        merged_deletions: 2,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -931,6 +958,8 @@ fn locally_deleted_remotely_modified() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 0,
+        merged_nodes: 4,
+        merged_deletions: 4,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -965,7 +994,10 @@ fn nonexistent_on_one_side() {
         "bookmarkAAAA",
         "bookmarkBBBB",
     ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_deletions: 2,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1043,7 +1075,11 @@ fn clear_folder_then_delete() {
         "folderAAAAAA",
         "folderDDDDDD",
     ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 7,
+        merged_deletions: 2,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1127,6 +1163,8 @@ fn newer_move_to_deleted() {
         local_revives: 0,
         remote_deletes: 1,
         dupes: 0,
+        merged_nodes: 6,
+        merged_deletions: 2,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1198,6 +1236,8 @@ fn deduping_local_newer() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 2,
+        merged_nodes: 5,
+        merged_deletions: 0,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1322,6 +1362,8 @@ fn deduping_remote_newer() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 6,
+        merged_nodes: 11,
+        merged_deletions: 0,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1433,6 +1475,8 @@ fn complex_deduping() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 6,
+        merged_nodes: 9,
+        merged_deletions: 0,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1470,7 +1514,10 @@ fn left_pane_root() {
         "folderLEFTPQ",
         "folderLEFTPR",
     ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_deletions: 4,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1569,7 +1616,11 @@ fn non_syncable_items() {
         "rootCCCCCCCC", // Non-syncable locally.
         "rootHHHHHHHH", // Non-syncable remotely.
     ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 5,
+        merged_deletions: 16,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1605,7 +1656,10 @@ fn applying_two_empty_folders_doesnt_smush() {
             ("emptyempty02", Folder)
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 3,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1667,6 +1721,8 @@ fn applying_two_empty_folders_matches_only_one() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 1,
+        merged_nodes: 4,
+        merged_deletions: 0,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1726,6 +1782,8 @@ fn deduping_ignores_parent_title() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 1,
+        merged_nodes: 2,
+        merged_deletions: 0,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -1765,7 +1823,10 @@ fn mismatched_compatible_bookmark_kinds() {
             ("bookmarkBBBB", Query)
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 3,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1862,7 +1923,10 @@ fn invalid_guids() {
             ("loooooongGUID", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 8,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1918,7 +1982,10 @@ fn multiple_parents() {
             })
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 10,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -1984,7 +2051,10 @@ fn reparent_orphans() {
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 8,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
@@ -2034,6 +2104,8 @@ fn deleted_user_content_roots() {
         local_revives: 0,
         remote_deletes: 0,
         dupes: 0,
+        merged_nodes: 4,
+        merged_deletions: 1,
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
@@ -2109,7 +2181,10 @@ fn moved_user_content_roots() {
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
-    let expected_telem = StructureCounts::default();
+    let expected_telem = StructureCounts {
+        merged_nodes: 13,
+        ..StructureCounts::default()
+    };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);

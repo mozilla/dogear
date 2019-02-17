@@ -32,18 +32,23 @@ pub(crate) enum StructureChange {
     Deleted,
 }
 
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
-pub(crate) struct StructureCounts {
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct StructureCounts {
     /// Remote non-folder change wins over local deletion.
-    pub remote_revives: i64,
+    pub remote_revives: usize,
     /// Local folder deletion wins over remote change.
-    pub local_deletes: i64,
+    pub local_deletes: usize,
     /// Local non-folder change wins over remote deletion.
-    pub local_revives: i64,
+    pub local_revives: usize,
     /// Remote folder deletion wins over local change.
-    pub remote_deletes: i64,
+    pub remote_deletes: usize,
     /// Deduped local items.
-    pub dupes: i64,
+    pub dupes: usize,
+    /// Total number of nodes in the merged tree, excluding the
+    /// root.
+    pub merged_nodes: usize,
+    /// Total number of deletions to apply, local and remote.
+    pub merged_deletions: usize,
 }
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for
@@ -159,11 +164,13 @@ impl <'t, D: Driver> Merger<'t, D> {
         for guid in self.local_tree.deletions() {
             if !self.mentions(guid) {
                 self.delete_remotely.insert(guid.clone());
+                self.structure_counts.merged_deletions += 1;
             }
         }
         for guid in self.remote_tree.deletions() {
             if !self.mentions(guid) {
                 self.delete_locally.insert(guid.clone());
+                self.structure_counts.merged_deletions += 1;
             }
         }
 
@@ -263,6 +270,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 self.merged_guids.insert(new_guid.clone());
                 // Upload tombstones for changed remote GUIDs.
                 self.delete_remotely.insert(remote_node.guid.clone());
+                self.structure_counts.merged_deletions += 1;
             }
             new_guid
         };
@@ -444,6 +452,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                         merged_child_node.merge_state.with_new_structure();
                 }
                 merged_node.merged_children.push(merged_child_node);
+                self.structure_counts.merged_nodes += 1;
                 return Ok(());
             }
 
@@ -486,6 +495,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                             merged_child_node.merge_state.with_new_structure();
                     }
                     merged_node.merged_children.push(merged_child_node);
+                    self.structure_counts.merged_nodes += 1;
                 },
             }
 
@@ -515,6 +525,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 merged_child_node.merge_state.with_new_structure();
         }
         merged_node.merged_children.push(merged_child_node);
+        self.structure_counts.merged_nodes += 1;
         Ok(())
     }
 
@@ -590,6 +601,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 merged_node.merge_state = merged_node.merge_state.with_new_structure();
                 merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
                 merged_node.merged_children.push(merged_child_node);
+                self.structure_counts.merged_nodes += 1;
                 return Ok(());
             }
 
@@ -617,6 +629,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                         merged_child_node.merge_state =
                             merged_child_node.merge_state.with_new_structure();
                         merged_node.merged_children.push(merged_child_node);
+                        self.structure_counts.merged_nodes += 1;
                     } else {
                         trace!(self.driver, "Local child {} repositioned locally in {} and \
                                 remotely in {}; keeping child in newer local position",
@@ -635,6 +648,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                                 merged_child_node.merge_state.with_new_structure();
                         }
                         merged_node.merged_children.push(merged_child_node);
+                        self.structure_counts.merged_nodes += 1;
                     }
                 },
 
@@ -693,6 +707,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             merged_child_node
         };
         merged_node.merged_children.push(merged_child_node);
+        self.structure_counts.merged_nodes += 1;
         Ok(())
     }
 
@@ -829,6 +844,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 // exist remotely, to the merged node.
                 self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
             }
+            self.structure_counts.merged_deletions += 1;
             return Ok(StructureChange::Deleted);
         }
 
@@ -842,6 +858,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     if remote_node.is_folder() {
                         self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
                     }
+                    self.structure_counts.merged_deletions += 1;
                     return Ok(StructureChange::Deleted);
                 }
                 if local_node.validity == Validity::Replace &&
@@ -853,6 +870,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     if remote_node.is_folder() {
                         self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
                     }
+                    self.structure_counts.merged_deletions += 1;
                     return Ok(StructureChange::Deleted);
                 }
                 let local_parent_node =
@@ -874,6 +892,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             if remote_node.is_folder() {
                 self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
             }
+            self.structure_counts.merged_deletions += 1;
             return Ok(StructureChange::Deleted);
         }
 
@@ -907,6 +926,7 @@ impl <'t, D: Driver> Merger<'t, D> {
         if remote_node.is_folder() {
             self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
         }
+        self.structure_counts.merged_deletions += 1;
         Ok(StructureChange::Deleted)
     }
 
@@ -941,6 +961,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             if local_node.is_folder() {
                 self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
             }
+            self.structure_counts.merged_deletions += 1;
             return Ok(StructureChange::Deleted);
         }
 
@@ -955,6 +976,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     if remote_node.is_folder() {
                         self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
                     }
+                    self.structure_counts.merged_deletions += 1;
                     return Ok(StructureChange::Deleted);
                 }
                 if remote_node.validity == Validity::Replace &&
@@ -966,6 +988,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     if local_node.is_folder() {
                         self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
                     }
+                    self.structure_counts.merged_deletions += 1;
                     return Ok(StructureChange::Deleted);
                 }
                 // Otherwise, either both nodes are valid; or the remote node
@@ -989,6 +1012,7 @@ impl <'t, D: Driver> Merger<'t, D> {
             if local_node.is_folder() {
                 self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
             }
+            self.structure_counts.merged_deletions += 1;
             return Ok(StructureChange::Deleted);
         }
 
@@ -1016,6 +1040,7 @@ impl <'t, D: Driver> Merger<'t, D> {
         if local_node.is_folder() {
             self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
         }
+        self.structure_counts.merged_deletions += 1;
         Ok(StructureChange::Deleted)
     }
 
@@ -1063,6 +1088,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     merged_orphan_node.merge_state =
                         merged_orphan_node.merge_state.with_new_structure();
                     merged_node.merged_children.push(merged_orphan_node);
+                    self.structure_counts.merged_nodes += 1;
                 },
             }
         }
@@ -1111,6 +1137,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                     merged_orphan_node.merge_state =
                         merged_orphan_node.merge_state.with_new_structure();
                     merged_node.merged_children.push(merged_orphan_node);
+                    self.structure_counts.merged_nodes += 1;
                 },
             }
         }

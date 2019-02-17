@@ -1040,6 +1040,15 @@ impl<'t> MergedNode<'t> {
 
     /// Returns a `Vec` of the merged node's descendants.
     pub fn descendants(&self) -> Vec<MergedDescendant> {
+        self.descendants_with_size_hint(None)
+    }
+
+    /// Builds a `Vec` of the merged node's descendants, optionally
+    /// preallocating enough space to hold them all. This avoids
+    /// extra allocations when the size of the entire merged tree is
+    /// known.
+    pub(crate) fn descendants_with_size_hint(&self, size_hint: Option<usize>)
+                                             -> Vec<MergedDescendant> {
         fn accumulate<'t>(results: &mut Vec<MergedDescendant<'t>>,
                           merged_node: &'t MergedNode<'t>,
                           level: usize) {
@@ -1054,7 +1063,10 @@ impl<'t> MergedNode<'t> {
                 accumulate(results, merged_child_node, level + 1);
             }
         }
-        let mut results = Vec::new();
+        let mut results = match size_hint {
+            Some(capacity) => Vec::with_capacity(capacity),
+            None => Vec::new(),
+        };
         accumulate(&mut results, self, 0);
         results
     }

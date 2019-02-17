@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, fmt::Arguments, time::{Duration, Instant}};
+use std::fmt::Arguments;
 
 use crate::error::{ErrorKind, Result};
 use crate::guid::Guid;
@@ -58,78 +58,6 @@ pub enum LogLevel {
     Debug,
     Trace,
     All,
-}
-
-/// Records timings and counters for telemetry.
-#[derive(Debug, Default)]
-pub struct Stats {
-    timings: HashMap<Timing, Duration>,
-    counts: HashMap<Counter, i64>,
-}
-
-impl Stats {
-    #[inline]
-    pub fn time(&mut self, key: Timing) -> TimingEntry {
-        TimingEntry(self, key)
-    }
-
-    #[inline]
-    pub fn count(&mut self, key: Counter) -> CounterEntry {
-        CounterEntry(self, key)
-    }
-}
-
-pub struct TimingEntry<'s>(&'s mut Stats, Timing);
-
-impl<'s> TimingEntry<'s> {
-    pub fn record<T, F: FnOnce() -> T>(self, func: F) -> T {
-        let now = Instant::now();
-        let result = func();
-        self.0.timings.insert(self.1, now.elapsed());
-        result
-    }
-
-    #[inline]
-    pub fn as_millis(&self) -> Option<f64> {
-        self.0.timings.get(&self.1)
-            .map(|d| d.as_secs() as f64 + f64::from(d.subsec_micros()) / 1000.0)
-    }
-}
-
-pub struct CounterEntry<'s>(&'s mut Stats, Counter);
-
-impl<'s> CounterEntry<'s> {
-    #[inline]
-    pub fn set(self, value: i64) -> &'s mut Stats {
-        self.0.counts.insert(self.1, value);
-        self.0
-    }
-
-    #[inline]
-    pub fn as_i64(&self) -> Option<i64> {
-        self.0.counts.get(&self.1).cloned()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Timing {
-    FetchLocalTree,
-    FetchNewLocalContents,
-    FetchRemoteTree,
-    FetchNewRemoteContents,
-    Merge,
-    Apply,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Counter {
-    MergedNodes,
-    MergedDeletions,
-    RemoteRevives,
-    LocalDeletes,
-    LocalRevives,
-    RemoteDeletes,
-    Dupes,
 }
 
 #[macro_export]
