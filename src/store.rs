@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::driver::{LogLevel, Driver, Stats, Timing, Counter};
+use crate::driver::{Driver, Stats, Timing, Counter};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Merger, Deletion};
@@ -53,7 +53,7 @@ pub trait Store<D: Driver, E: From<Error>> {
         let local_tree = stats
             .time(Timing::FetchLocalTree)
             .record(|| self.fetch_local_tree(local_time_millis))?;
-        trace!(driver, "Built local tree from mirror\n{}", local_tree);
+        debug!(driver, "Built local tree from mirror\n{}", local_tree);
 
         let new_local_contents = stats
             .time(Timing::FetchNewLocalContents)
@@ -62,7 +62,7 @@ pub trait Store<D: Driver, E: From<Error>> {
         let remote_tree = stats
             .time(Timing::FetchRemoteTree)
             .record(|| self.fetch_remote_tree(remote_time_millis))?;
-        trace!(driver, "Built remote tree from mirror\n{}", remote_tree);
+        debug!(driver, "Built remote tree from mirror\n{}", remote_tree);
 
         let new_remote_contents = stats
             .time(Timing::FetchNewRemoteContents)
@@ -71,22 +71,10 @@ pub trait Store<D: Driver, E: From<Error>> {
         let mut merger = Merger::with_driver(driver, &local_tree, &new_local_contents,
                                              &remote_tree, &new_remote_contents);
         let merged_root = stats.time(Timing::Merge).record(|| merger.merge())?;
-        if driver.log_level() >= LogLevel::Trace {
-            let delete_locally = merger
-                .delete_locally
-                .iter()
-                .map(|guid| guid.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let delete_remotely = merger
-                .delete_remotely
-                .iter()
-                .map(|guid| guid.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            trace!(driver, "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
-                   merged_root.to_ascii_string(), delete_locally, delete_remotely);
-        }
+        debug!(driver, "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
+               merged_root.to_ascii_string(),
+               merger.delete_locally.iter().map(Guid::as_str).collect::<Vec<_>>().join(", "),
+               merger.delete_remotely.iter().map(Guid::as_str).collect::<Vec<_>>().join(", "));
         stats
             .count(Counter::RemoteRevives)
             .set(merger.structure_counts.remote_revives)

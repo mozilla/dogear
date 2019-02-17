@@ -50,10 +50,12 @@ pub struct DefaultDriver;
 
 impl Driver for DefaultDriver {}
 
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LogLevel {
     Silent,
     Error,
+    Warn,
+    Debug,
     Trace,
     All,
 }
@@ -131,19 +133,29 @@ pub enum Counter {
 }
 
 #[macro_export]
-macro_rules! trace {
-    ($driver:expr, $($args:tt)+) => {
-        if $driver.log_level() >= $crate::driver::LogLevel::Trace {
-            $driver.log($crate::driver::LogLevel::Trace, format_args!($($args)+));
-        }
-    };
+macro_rules! error {
+    ($driver:expr, $($args:tt)+) => (log!(Error, $driver, $($args)+));
+}
+
+macro_rules! warn {
+    ($driver:expr, $($args:tt)+) => (log!(Warn, $driver, $($args)+));
 }
 
 #[macro_export]
-macro_rules! error {
-    ($driver:expr, $($args:tt)+) => {
-        if $driver.log_level() >= $crate::driver::LogLevel::Error {
-            $driver.log($crate::driver::LogLevel::Error, format_args!($($args)+));
+macro_rules! debug {
+    ($driver:expr, $($args:tt)+) => (log!(Debug, $driver, $($args)+));
+}
+
+#[macro_export]
+macro_rules! trace {
+    ($driver:expr, $($args:tt)+) => (log!(Trace, $driver, $($args)+));
+}
+
+#[macro_export]
+macro_rules! log {
+    ($level:ident, $driver:expr, $($args:tt)+) => {
+        if $driver.log_level() >= $crate::driver::LogLevel::$level {
+            $driver.log($crate::driver::LogLevel::$level, format_args!($($args)+));
         }
     };
 }
