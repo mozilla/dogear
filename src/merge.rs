@@ -849,16 +849,16 @@ impl <'t, D: Driver> Merger<'t, D> {
                     }
                     return Ok(StructureChange::Deleted);
                 }
-                if local_node.validity == Validity::Replace {
-                    if remote_node.validity == Validity::Replace {
-                        // The nodes are invalid on both sides, so we can't apply or reupload
-                        // a valid copy. Delete the item from the server.
-                        self.delete_remotely.insert(remote_node.guid.clone());
-                        if remote_node.is_folder() {
-                            self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
-                        }
-                        return Ok(StructureChange::Deleted);
+                if local_node.validity == Validity::Replace &&
+                    remote_node.validity == Validity::Replace {
+
+                    // The nodes are invalid on both sides, so we can't apply or reupload
+                    // a valid copy. Delete the item from the server.
+                    self.delete_remotely.insert(remote_node.guid.clone());
+                    if remote_node.is_folder() {
+                        self.relocate_remote_orphans_to_merged_node(merged_node, remote_node)?;
                     }
+                    return Ok(StructureChange::Deleted);
                 }
                 let local_parent_node =
                     local_node.parent()
@@ -962,19 +962,20 @@ impl <'t, D: Driver> Merger<'t, D> {
                     }
                     return Ok(StructureChange::Deleted);
                 }
-                if remote_node.validity == Validity::Replace {
-                    if local_node.validity == Validity::Replace {
-                        // The nodes are invalid on both sides, so we can't apply or reupload
-                        // a valid copy. Delete the item from Places.
-                        self.delete_locally.insert(local_node.guid.clone());
-                        if local_node.is_folder() {
-                            self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
-                        }
-                        return Ok(StructureChange::Deleted);
+                if remote_node.validity == Validity::Replace &&
+                    local_node.validity == Validity::Replace {
+
+                    // The nodes are invalid on both sides, so we can't apply or reupload
+                    // a valid copy. Delete the item from Places.
+                    self.delete_locally.insert(local_node.guid.clone());
+                    if local_node.is_folder() {
+                        self.relocate_local_orphans_to_merged_node(merged_node, local_node)?;
                     }
-                    // Otherwise, the remote node is invalid but the local node is valid,
-                    // so we can reupload a valid copy.
+                    return Ok(StructureChange::Deleted);
                 }
+                // Otherwise, either both nodes are valid; or the remote node
+                // is invalid but the local node is valid, so we can reupload a
+                // valid copy.
                 let remote_parent_node =
                     remote_node.parent()
                                .expect("Can't check for structure changes without remote parent");
@@ -1324,8 +1325,9 @@ impl <'t, D: Driver> Merger<'t, D> {
     }
 }
 
-/// ...
-fn remote_node_is_syncable<'t>(remote_node: &Node) -> bool {
+/// Indicates if the tree in the remote node is syncable. This filters out
+/// livemarks (bug 1477671) and orphaned Places queries (bug 1433182).
+fn remote_node_is_syncable(remote_node: &Node) -> bool {
     if !remote_node.is_syncable() {
         return false;
     }
