@@ -51,7 +51,7 @@ macro_rules! time {
 pub trait Store<D: Driver, E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the local store.
-    fn fetch_local_tree(&self, local_time_millis: i64) -> Result<Tree, E>;
+    fn fetch_local_tree(&self) -> Result<Tree, E>;
 
     /// Fetches content info for all new local items that haven't been uploaded
     /// or merged yet. We'll try to dedupe them to remotely changed items with
@@ -60,7 +60,7 @@ pub trait Store<D: Driver, E: From<Error>> {
 
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the mirror.
-    fn fetch_remote_tree(&self, remote_time_millis: i64) -> Result<Tree, E>;
+    fn fetch_remote_tree(&self) -> Result<Tree, E>;
 
     /// Fetches content info for all items in the mirror that changed since the
     /// last sync and don't exist locally. We'll try to match new local items to
@@ -75,12 +75,10 @@ pub trait Store<D: Driver, E: From<Error>> {
     fn apply<'t>(&mut self, descendants: Vec<MergedDescendant<'t>>,
                  deletions: Vec<Deletion>) -> Result<(), E>;
 
-    fn merge(&mut self, driver: &D, local_time_millis: i64, remote_time_millis: i64)
-             -> Result<Stats, E> {
-
+    fn merge(&mut self, driver: &D) -> Result<Stats, E> {
         let mut merge_timings = MergeTimings::default();
         let local_tree = time!(merge_timings, fetch_local_tree, {
-            self.fetch_local_tree(local_time_millis)
+            self.fetch_local_tree()
         })?;
         debug!(driver, "Built local tree from mirror\n{}", local_tree);
 
@@ -89,7 +87,7 @@ pub trait Store<D: Driver, E: From<Error>> {
         })?;
 
         let remote_tree = time!(merge_timings, fetch_remote_tree, {
-            self.fetch_remote_tree(remote_time_millis)
+            self.fetch_remote_tree()
         })?;
         debug!(driver, "Built remote tree from mirror\n{}", remote_tree);
 
