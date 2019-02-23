@@ -30,23 +30,23 @@ pub trait IsValidGuid {
 /// in which case we fall back to a heap-allocated string.
 #[derive(Clone)]
 enum Repr {
-    Fast([u8; 12]),
-    Slow(String),
+    Valid([u8; 12]),
+    Invalid(String),
 }
 
 /// The Places root GUID, used to root all items in a bookmark tree.
-pub const ROOT_GUID: Guid = Guid(Repr::Fast(*b"root________"));
+pub const ROOT_GUID: Guid = Guid(Repr::Valid(*b"root________"));
 
 /// The "Other Bookmarks" GUID, used to hold items without a parent.
-pub const UNFILED_GUID: Guid = Guid(Repr::Fast(*b"unfiled_____"));
+pub const UNFILED_GUID: Guid = Guid(Repr::Valid(*b"unfiled_____"));
 
 /// The syncable Places roots. All synced items should descend from these
 /// roots.
 pub const USER_CONTENT_ROOTS: [Guid; 4] = [
-    Guid(Repr::Fast(*b"toolbar_____")),
-    Guid(Repr::Fast(*b"menu________")),
+    Guid(Repr::Valid(*b"toolbar_____")),
+    Guid(Repr::Valid(*b"menu________")),
     UNFILED_GUID,
-    Guid(Repr::Fast(*b"mobile______")),
+    Guid(Repr::Valid(*b"mobile______")),
 ];
 
 const VALID_GUID_BYTES: [u8; 255] =
@@ -65,10 +65,10 @@ impl Guid {
         let repr = if b.is_valid_guid() {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(b);
-            Repr::Fast(bytes)
+            Repr::Valid(bytes)
         } else {
             match str::from_utf8(b) {
-                Ok(s) => Repr::Slow(s.into()),
+                Ok(s) => Repr::Invalid(s.into()),
                 Err(err) => return Err(err.into()),
             }
         };
@@ -84,10 +84,10 @@ impl Guid {
                 }
                 bytes[index] = byte as u8;
             }
-            Repr::Fast(bytes)
+            Repr::Valid(bytes)
         } else {
             match String::from_utf16(b) {
-                Ok(s) => Repr::Slow(s),
+                Ok(s) => Repr::Invalid(s),
                 Err(err) => return Err(err.into()),
             }
         };
@@ -97,8 +97,8 @@ impl Guid {
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self.0 {
-            Repr::Fast(ref bytes) => bytes,
-            Repr::Slow(ref s) => s.as_ref(),
+            Repr::Valid(ref bytes) => bytes,
+            Repr::Invalid(ref s) => s.as_ref(),
         }
     }
 
@@ -108,10 +108,10 @@ impl Guid {
         // often we end up doing this, it's arguable that we should. We know
         // already this is valid utf8, since we know that we only ever create
         // these while respecting is_valid (and moreover, we assert that
-        // `s.is_char_boundary(12)` above).
+        // `s.is_char_boundary(12)` in `Guid::from`).
         match self.0 {
-            Repr::Fast(ref bytes) => str::from_utf8(bytes).unwrap(),
-            Repr::Slow(ref s) => s,
+            Repr::Valid(ref bytes) => str::from_utf8(bytes).unwrap(),
+            Repr::Invalid(ref s) => s,
         }
     }
 
@@ -125,8 +125,8 @@ impl IsValidGuid for Guid {
     #[inline]
     fn is_valid_guid(&self) -> bool {
         match self.0 {
-            Repr::Fast(_) => true,
-            Repr::Slow(_) => false,
+            Repr::Valid(_) => true,
+            Repr::Invalid(_) => false,
         }
     }
 }
@@ -148,9 +148,9 @@ impl<'a> From<&'a str> for Guid {
             assert!(s.is_char_boundary(12));
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(s.as_bytes());
-            Repr::Fast(bytes)
+            Repr::Valid(bytes)
         } else {
-            Repr::Slow(s.into())
+            Repr::Invalid(s.into())
         };
         Guid(repr)
     }
@@ -237,23 +237,26 @@ mod tests {
                             "menu________",
                             "__folderBB__",
                             "queryAAAAAAA"];
-        for guid in valid_guids {
-            assert!(guid.as_bytes().is_valid_guid(),
+        for s in valid_guids {
+            assert!(s.as_bytes().is_valid_guid(),
                     "{:?} should validate",
-                    guid);
+                    s);
+            assert!(Guid::from(*s).is_valid_guid());
         }
 
         let invalid_guids = &["bookmarkAAA", "folder!", "b@dgu1d!"];
-        for guid in invalid_guids {
-            assert!(!guid.as_bytes().is_valid_guid(),
+        for s in invalid_guids {
+            assert!(!s.as_bytes().is_valid_guid(),
                     "{:?} should not validate",
-                    guid);
+                    s);
+            assert!(!Guid::from(*s).is_valid_guid());
         }
 
         let invalid_guid_bytes: &[[u8; 12]] =
             &[[113, 117, 101, 114, 121, 65, 225, 193, 65, 65, 65, 65]];
         for bytes in invalid_guid_bytes {
             assert!(!bytes.is_valid_guid(), "{:?} should not validate", bytes);
+            Guid::from_utf8(bytes).expect_err("Should not make GUID from invalid UTF-8");
         }
     }
 }
