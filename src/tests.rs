@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap};
 
 use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
@@ -343,7 +343,7 @@ fn unchanged_newer_changed_older() {
     let expected_deletions = vec![
         "folderAAAAAA",
         "folderCCCCCC",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -358,7 +358,7 @@ fn unchanged_newer_changed_older() {
     assert_eq!(merged_tree, expected_tree);
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
-    deletions.sort_unstable();
+    deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
     assert_eq!(&merger.structure_counts, &expected_telem);
@@ -782,7 +782,7 @@ fn complex_orphaning() {
     let expected_deletions = vec![
         "folderBBBBBB",
         "folderEEEEEE",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -797,7 +797,7 @@ fn complex_orphaning() {
     assert_eq!(merged_tree, expected_tree);
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
-    deletions.sort_unstable();
+    deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
     assert_eq!(&merger.structure_counts, &expected_telem);
@@ -876,7 +876,7 @@ fn locally_modified_remotely_deleted() {
     let expected_deletions = vec![
         "folderBBBBBB",
         "folderEEEEEE",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -951,7 +951,7 @@ fn locally_deleted_remotely_modified() {
         "bookmarkEEEE",
         "folderBBBBBB",
         "folderDDDDDD",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         remote_revives: 1,
         local_deletes: 2,
@@ -993,7 +993,7 @@ fn nonexistent_on_one_side() {
     let expected_deletions = vec![
         "bookmarkAAAA",
         "bookmarkBBBB",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         merged_deletions: 2,
         ..StructureCounts::default()
@@ -1074,7 +1074,7 @@ fn clear_folder_then_delete() {
     let expected_deletions = vec![
         "folderAAAAAA",
         "folderDDDDDD",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         merged_nodes: 7,
         merged_deletions: 2,
@@ -1156,7 +1156,7 @@ fn newer_move_to_deleted() {
     let expected_deletions = vec![
         "folderAAAAAA",
         "folderCCCCCC",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -1513,7 +1513,7 @@ fn left_pane_root() {
         "folderLEFTPF",
         "folderLEFTPQ",
         "folderLEFTPR",
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         merged_deletions: 4,
         ..StructureCounts::default()
@@ -1615,7 +1615,7 @@ fn non_syncable_items() {
         "folderLEFTPR", // Non-syncable remotely.
         "rootCCCCCCCC", // Non-syncable locally.
         "rootHHHHHHHH", // Non-syncable remotely.
-    ].into_iter().map(|guid| guid.into()).collect::<Vec<Guid>>();
+    ];
     let expected_telem = StructureCounts {
         merged_nodes: 5,
         merged_deletions: 16,
@@ -1868,18 +1868,29 @@ fn mismatched_incompatible_bookmark_kinds() {
 fn invalid_guids() {
     before_each();
 
-    struct AllowInvalidGuids;
+    #[derive(Default)]
+    struct GenerateNewGuid(Cell<usize>);
 
-    impl Driver for AllowInvalidGuids {
-        fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
-            Ok(invalid_guid.clone())
+    impl Driver for GenerateNewGuid {
+        fn generate_new_guid(&self, old_guid: &Guid) -> Result<Guid> {
+            let count = self.0.get();
+            self.0.set(count + 1);
+            assert!(&[
+                ")(*&",
+                "shortGUID",
+                "loooooongGUID",
+                "!@#$%^",
+                "",
+            ].contains(&old_guid.as_str()), "Didn't expect to generate new GUID for {}", old_guid);
+            Ok(format!("item{:0>8}", count).into())
         }
     }
 
     let local_tree = nodes!({
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5]),
-            ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5])
+            ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5]),
+            (")(*&", Bookmark[needs_merge = true, age = 5])
         }),
         ("menu________", Folder[needs_merge = true], {
             ("shortGUID", Bookmark[needs_merge = true]),
@@ -1902,7 +1913,8 @@ fn invalid_guids() {
     }).into_tree().unwrap();
     let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
-    let mut merger = Merger::with_driver(&AllowInvalidGuids,
+    let driver = GenerateNewGuid::default();
+    let mut merger = Merger::with_driver(&driver,
                                          &local_tree,
                                          &new_local_contents,
                                          &remote_tree,
@@ -1913,25 +1925,35 @@ fn invalid_guids() {
 
     let expected_tree = nodes!({
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
-            ("!@#$%^", Bookmark[age = 5]),
-            ("", Bookmark[age = 5])
+            ("item00000000", Bookmark[needs_merge = true, age = 5]),
+            ("item00000001", Bookmark[needs_merge = true, age = 5]),
+            ("item00000002", Bookmark[needs_merge = true, age = 5])
         }),
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark),
             ("bookmarkBBBB", Bookmark),
-            ("shortGUID", Bookmark[needs_merge = true]),
-            ("loooooongGUID", Bookmark[needs_merge = true])
+            ("item00000003", Bookmark[needs_merge = true]),
+            ("item00000004", Bookmark[needs_merge = true])
         })
     }).into_tree().unwrap();
+    let expected_deletions = vec![
+        "",
+        "!@#$%^",
+        "loooooongGUID",
+        "shortGUID",
+    ];
     let expected_telem = StructureCounts {
-        merged_nodes: 8,
+        merged_nodes: 9,
+        merged_deletions: 4,
         ..StructureCounts::default()
     };
 
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    assert_eq!(merger.deletions().count(), 0);
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    deletions.sort();
+    assert_eq!(deletions, expected_deletions);
 
     assert_eq!(&merger.structure_counts, &expected_telem);
 }

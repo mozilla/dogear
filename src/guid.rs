@@ -141,6 +141,13 @@ impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     }
 }
 
+impl From<String> for Guid {
+    #[inline]
+    fn from(s: String) -> Guid {
+        Guid::from(s.as_str())
+    }
+}
+
 impl<'a> From<&'a str> for Guid {
     #[inline]
     fn from(s: &'a str) -> Guid {
@@ -196,6 +203,13 @@ impl PartialEq<str> for Guid {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         PartialEq::eq(self.as_str(), other)
+    }
+}
+
+impl<'a> PartialEq<&'a str> for Guid {
+    #[inline]
+    fn eq(&self, other: &&'a str) -> bool {
+        self == *other
     }
 }
 
