@@ -1,4 +1,4 @@
-// Copyright 2018 Mozilla
+// Copyright 2018-2019 Mozilla
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,12 +57,14 @@ macro_rules! nodes {
     ($children:tt) => { nodes!(ROOT_GUID, Folder[needs_merge = true], $children) };
     ($guid:expr, $kind:ident) => { nodes!(Guid::from($guid), $kind[]) };
     ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
+        #[allow(unused_mut)]
         let mut item = Item::new(Guid::from($guid), Kind::$kind);
         $({ item.$name = $value; })*
         Node::new(item)
     }};
     ($guid:expr, $kind:ident, $children:tt) => { nodes!($guid, $kind[], $children) };
     ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ], { $(( $($children:tt)+ )),* }) => {{
+        #[allow(unused_mut)]
         let mut node = nodes!($guid, $kind [ $( $name = $value ),* ]);
         $({
             let child = nodes!($($children)*);

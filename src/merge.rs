@@ -1,4 +1,4 @@
-// Copyright 2018 Mozilla
+// Copyright 2018-2019 Mozilla
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1198,7 +1198,7 @@ impl <'t, D: Driver> Merger<'t, D> {
                 self.new_remote_contents
                     .and_then(|contents| contents.get(&remote_child_node.guid))
             {
-                if let Some(mut local_nodes_for_key) =
+                if let Some(local_nodes_for_key) =
                     dupe_key_to_local_nodes.get_mut(remote_child_content)
                 {
                     if let Some(local_child_node) = local_nodes_for_key.pop_front() {
