@@ -1083,7 +1083,7 @@ impl<'t> MergedNode<'t> {
             let node = merged_node.merge_state.node();
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
-            item.needs_merge = merged_node.merge_state.should_upload();
+            item.needs_merge = merged_node.merge_state.upload_reason() != UploadReason::None;
             item
         }
 
@@ -1173,6 +1173,21 @@ pub enum MergeState<'t> {
     Unchanged { local_node: Node<'t>, remote_node: Node<'t> },
 }
 
+/// The reason for uploading or reuploading a merged descendant.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum UploadReason {
+    /// The item doesn't need to be uploaded.
+    None,
+    /// The item was added locally since the last sync.
+    LocallyNew,
+    /// The item has newer local changes.
+    Merged,
+    /// The item didn't change locally, but has new structure. Reuploading
+    /// the same item with new structure on every sync may indicate a sync loop,
+    /// where two or more clients clash trying to fix up the remote tree.
+    NewStructure,
+}
+
 impl<'t> MergeState<'t> {
     /// Returns the local node for the item, or `None` if the item only exists
     /// remotely. The inverse of `remote_node()`.
@@ -1221,17 +1236,32 @@ impl<'t> MergeState<'t> {
         }
     }
 
-    /// Returns `true` if the merged item should be (re)uploaded to the server.
-    pub fn should_upload(&self) -> bool {
+    /// Returns the reason for (re)uploading this node.
+    pub fn upload_reason(&self) -> UploadReason {
         match self {
-            MergeState::LocalOnly(_)
-            | MergeState::Local { .. }
-            | MergeState::RemoteOnlyWithNewStructure(_)
-            | MergeState::RemoteWithNewStructure { .. } => true,
-
-            MergeState::RemoteOnly(_)
-            | MergeState::Remote { .. }
-            | MergeState::Unchanged { .. } => false,
+            MergeState::LocalOnly(_) => UploadReason::LocallyNew,
+            MergeState::RemoteOnly(_) => UploadReason::None,
+            MergeState::Local { .. } => UploadReason::Merged,
+            MergeState::Remote { .. } => UploadReason::None,
+            MergeState::RemoteOnlyWithNewStructure(_) => {
+                // We're reuploading an item that only exists remotely, so it
+                // must have new structure. Otherwise, its merge state would
+                // be remote only, without new structure.
+                UploadReason::NewStructure
+            },
+            MergeState::RemoteWithNewStructure { local_node, .. } => {
+                if local_node.needs_merge {
+                    // The item exists on both sides, and changed locally, so
+                    // we're uploading to resolve a merge conflict.
+                    UploadReason::Merged
+                } else {
+                    // The item exists on both sides, and didn't change locally,
+                    // so we must be uploading new structure to fix GUIDs or
+                    // divergences.
+                    UploadReason::NewStructure
+                }
+            },
+            MergeState::Unchanged { .. } => UploadReason::None,
         }
     }
 

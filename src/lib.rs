@@ -29,4 +29,4 @@ pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::guid::{Guid, ROOT_GUID, USER_CONTENT_ROOTS};
 pub use crate::merge::{Deletion, Merger, StructureCounts};
 pub use crate::store::{MergeTimings, Stats, Store};
-pub use crate::tree::{Child, Content, Item, Kind, Validity, MergedDescendant, MergeState, MergedNode, ParentGuidFrom, Tree};
+pub use crate::tree::{Child, Content, Item, Kind, Validity, MergedDescendant, MergeState, MergedNode, ParentGuidFrom, Tree, UploadReason};
