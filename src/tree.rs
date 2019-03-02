@@ -1026,8 +1026,16 @@ impl fmt::Display for Kind {
 /// Synced item validity.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Validity {
+    /// The item is valid, and can be applied as-is.
     Valid,
+
+    /// The item can be applied, but should also be flagged for reupload. Places
+    /// uses this to rewrite legacy tag queries.
     Reupload,
+
+    /// The item isn't valid at all, and should either be replaced with a valid
+    /// local copy, or deleted if a valid local copy doesn't exist. Places uses
+    /// this to flag bookmarks and queries without valid URLs.
     Replace,
 }
 
