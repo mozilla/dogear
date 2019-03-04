@@ -1,8 +1,8 @@
 # Dogear
 
-**Dogear** is a library for merging bookmark trees. The merge algorithm is used in [Firefox Desktop](https://searchfox.org/mozilla-central/rev/e9d2dce0820fa2616174396459498bcb96ecf812/toolkit/components/places/SyncedBookmarksMirror.jsm) to merge synced bookmarks, and is loosely based on the tree merger in [Firefox for iOS](https://github.com/mozilla-mobile/firefox-ios/blob/8b7b21cf1dcdbb8353a60749db9054696a1f4a5d/Sync/Synchronizers/Bookmarks/ThreeWayTreeMerger.swift). Dogear can also be used to dedupe and merge structurally similar trees; for example, when importing bookmarks.
+**Dogear** is a library that implements bookmark tree merging for Firefox Sync. It takes two trees—a valid, consistent local tree, and a possibly inconsistent remote tree—and produces a complete merged tree, with all conflicts and inconsistencies resolved.
 
-Currently, Dogear only implements merging, and doesn't handle storage or syncing.
+Dogear implements the merge algorithm only; it doesn't handle syncing, storage, or application. It's up to the crate that embeds Dogear to store local and incoming bookmarks, describe how to build a tree from a storage backend, persist the merged tree back to storage, and upload records for changed bookmarks.
 
 ## Requirements
 
