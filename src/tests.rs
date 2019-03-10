@@ -18,7 +18,7 @@ use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
-use crate::tree::{Content, IntoTree, Item, Kind, Tree, Builder, Validity};
+use crate::tree::{Builder, Content, IntoTree, Item, Kind, Tree, Validity};
 
 #[derive(Debug)]
 struct Node {
@@ -28,7 +28,10 @@ struct Node {
 
 impl Node {
     fn new(item: Item) -> Node {
-        Node { item, children: Vec::new() }
+        Node {
+            item,
+            children: Vec::new(),
+        }
     }
 
     fn into_builder(self) -> Result<Builder> {
@@ -102,7 +105,9 @@ fn reparent_and_reposition() {
             }),
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("unfiled_____", Folder[needs_merge = true], {
@@ -118,7 +123,9 @@ fn reparent_and_reposition() {
                 ("bookmarkEEEE", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -141,7 +148,9 @@ fn reparent_and_reposition() {
                 ("bookmarkEEEE", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 10,
         ..StructureCounts::default()
@@ -167,7 +176,9 @@ fn move_into_parent_sibling() {
                 ("bookmarkBBBB", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -176,7 +187,9 @@ fn move_into_parent_sibling() {
                 ("bookmarkBBBB", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -190,7 +203,9 @@ fn move_into_parent_sibling() {
                 ("bookmarkBBBB", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 4,
         ..StructureCounts::default()
@@ -219,7 +234,9 @@ fn reorder_and_insert() {
             ("bookmarkEEEE", Bookmark),
             ("bookmarkFFFF", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let local_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -234,7 +251,9 @@ fn reorder_and_insert() {
             ("bookmarkGGGG", Bookmark[needs_merge = true]),
             ("bookmarkHHHH", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
@@ -249,7 +268,9 @@ fn reorder_and_insert() {
             ("bookmarkDDDD", Bookmark),
             ("bookmarkEEEE", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -275,7 +296,9 @@ fn reorder_and_insert() {
             ("bookmarkGGGG", Bookmark[needs_merge = true]),
             ("bookmarkHHHH", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
@@ -302,7 +325,9 @@ fn unchanged_newer_changed_older() {
             ("folderCCCCCC", Folder[age = 5]),
             ("bookmarkDDDD", Bookmark[age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut local_tree = nodes!({
         // Even though the local menu is newer (local = 5s, remote = 9s;
@@ -317,7 +342,9 @@ fn unchanged_newer_changed_older() {
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkDDDD", Bookmark[age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("folderCCCCCC".into());
 
     let mut remote_tree = nodes!({
@@ -332,7 +359,9 @@ fn unchanged_newer_changed_older() {
             }),
             ("bookmarkDDDD", Bookmark[age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("folderAAAAAA".into());
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
@@ -349,11 +378,10 @@ fn unchanged_newer_changed_older() {
             ("bookmarkDDDD", Bookmark[age = 5]),
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "folderAAAAAA",
-        "folderCCCCCC",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["folderAAAAAA", "folderCCCCCC"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -393,7 +421,9 @@ fn newer_local_moves() {
             }),
             ("folderHHHHHH", Folder[age = 10])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let local_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -414,7 +444,9 @@ fn newer_local_moves() {
         ("mobile______", Folder[needs_merge = true], {
             ("folderBBBBBB", Folder[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true, age = 5], {
@@ -435,7 +467,9 @@ fn newer_local_moves() {
                 ("bookmarkCCCC", Bookmark[needs_merge = true, age = 5])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -461,7 +495,9 @@ fn newer_local_moves() {
         ("mobile______", Folder[needs_merge = true], {
             ("folderBBBBBB", Folder[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
@@ -494,7 +530,9 @@ fn newer_remote_moves() {
             }),
             ("folderHHHHHH", Folder[age = 10])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let local_tree = nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
@@ -515,7 +553,9 @@ fn newer_remote_moves() {
         ("mobile______", Folder[needs_merge = true, age = 5], {
             ("folderBBBBBB", Folder[needs_merge = true, age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true], {
@@ -536,7 +576,9 @@ fn newer_remote_moves() {
                 ("bookmarkCCCC", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -562,7 +604,9 @@ fn newer_remote_moves() {
         ("mobile______", Folder[needs_merge = true, age = 5], {
             ("bookmarkAAAA", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
@@ -590,7 +634,9 @@ fn value_structure_conflict() {
                 ("bookmarkEEEE", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let local_tree = nodes!({
         ("menu________", Folder, {
@@ -602,7 +648,9 @@ fn value_structure_conflict() {
                 ("bookmarkEEEE", Bookmark[age = 10])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder, {
@@ -614,7 +662,9 @@ fn value_structure_conflict() {
                 ("bookmarkEEEE", Bookmark[needs_merge = true, age = 5])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -631,7 +681,9 @@ fn value_structure_conflict() {
                 ("bookmarkBBBB", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 6,
         ..StructureCounts::default()
@@ -656,7 +708,9 @@ fn complex_move_with_additions() {
                 ("bookmarkCCCC", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let local_tree = nodes!({
         ("menu________", Folder, {
@@ -666,7 +720,9 @@ fn complex_move_with_additions() {
                 ("bookmarkDDDD", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -678,7 +734,9 @@ fn complex_move_with_additions() {
                 ("bookmarkEEEE", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -700,7 +758,9 @@ fn complex_move_with_additions() {
                 ("bookmarkDDDD", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 7,
         ..StructureCounts::default()
@@ -731,7 +791,9 @@ fn complex_orphaning() {
                 })
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     // Locally: delete E, add B > F.
     let mut local_tree = nodes!({
@@ -747,7 +809,9 @@ fn complex_orphaning() {
                 ("folderDDDDDD", Folder[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("folderEEEEEE".into());
 
     // Remotely: delete B, add E > G.
@@ -764,7 +828,9 @@ fn complex_orphaning() {
                 })
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("folderBBBBBB".into());
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
@@ -788,11 +854,10 @@ fn complex_orphaning() {
                 })
             })
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "folderBBBBBB",
-        "folderEEEEEE",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["folderBBBBBB", "folderEEEEEE"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -830,7 +895,9 @@ fn locally_modified_remotely_deleted() {
                 })
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut local_tree = nodes!({
         ("toolbar_____", Folder, {
@@ -845,7 +912,9 @@ fn locally_modified_remotely_deleted() {
                 ("folderDDDDDD", Folder[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("folderEEEEEE".into());
 
     let mut remote_tree = nodes!({
@@ -861,7 +930,9 @@ fn locally_modified_remotely_deleted() {
                 })
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("folderBBBBBB".into());
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
@@ -882,11 +953,10 @@ fn locally_modified_remotely_deleted() {
                 })
             })
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "folderBBBBBB",
-        "folderEEEEEE",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["folderBBBBBB", "folderEEEEEE"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -921,12 +991,20 @@ fn locally_deleted_remotely_modified() {
                 })
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
-    let mut local_tree = nodes!({
-        ("menu________", Folder[needs_merge = true])
-    }).into_tree().unwrap();
-    for guid in &["bookmarkAAAA", "folderBBBBBB", "bookmarkCCCC", "folderDDDDDD", "bookmarkEEEE"] {
+    let mut local_tree = nodes!({ ("menu________", Folder[needs_merge = true]) })
+        .into_tree()
+        .unwrap();
+    for guid in &[
+        "bookmarkAAAA",
+        "folderBBBBBB",
+        "bookmarkCCCC",
+        "folderDDDDDD",
+        "bookmarkEEEE",
+    ] {
         local_tree.note_deleted(guid.to_owned().into());
     }
 
@@ -942,7 +1020,9 @@ fn locally_deleted_remotely_modified() {
                 ("bookmarkGGGG", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -955,7 +1035,9 @@ fn locally_deleted_remotely_modified() {
             ("bookmarkFFFF", Bookmark[needs_merge = true]),
             ("bookmarkGGGG", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_deletions = vec![
         "bookmarkCCCC",
         "bookmarkEEEE",
@@ -1000,10 +1082,7 @@ fn nonexistent_on_one_side() {
     assert!(merger.subsumes(&remote_tree));
 
     let expected_tree = nodes!({}).into_tree().unwrap();
-    let expected_deletions = vec![
-        "bookmarkAAAA",
-        "bookmarkBBBB",
-    ];
+    let expected_deletions = vec!["bookmarkAAAA", "bookmarkBBBB"];
     let expected_telem = StructureCounts {
         merged_deletions: 2,
         ..StructureCounts::default()
@@ -1034,7 +1113,9 @@ fn clear_folder_then_delete() {
                 ("bookmarkFFFF", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut local_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -1047,7 +1128,9 @@ fn clear_folder_then_delete() {
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("folderDDDDDD".into());
 
     let mut remote_tree = nodes!({
@@ -1061,7 +1144,9 @@ fn clear_folder_then_delete() {
         ("unfiled_____", Folder[needs_merge = true], {
             ("bookmarkCCCC", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("folderAAAAAA".into());
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
@@ -1080,11 +1165,10 @@ fn clear_folder_then_delete() {
         ("unfiled_____", Folder, {
             ("bookmarkCCCC", Bookmark)
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "folderAAAAAA",
-        "folderDDDDDD",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["folderAAAAAA", "folderDDDDDD"];
     let expected_telem = StructureCounts {
         merged_nodes: 7,
         merged_deletions: 2,
@@ -1114,7 +1198,9 @@ fn newer_move_to_deleted() {
                 ("bookmarkDDDD", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut local_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -1129,7 +1215,9 @@ fn newer_move_to_deleted() {
         ("toolbar_____", Folder[needs_merge = true], {
             ("bookmarkDDDD", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("folderCCCCCC".into());
 
     let mut remote_tree = nodes!({
@@ -1145,7 +1233,9 @@ fn newer_move_to_deleted() {
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("folderAAAAAA".into());
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
@@ -1162,11 +1252,10 @@ fn newer_move_to_deleted() {
             ("bookmarkDDDD", Bookmark[needs_merge = true]),
             ("bookmarkBBBB", Bookmark[age = 5])
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "folderAAAAAA",
-        "folderCCCCCC",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["folderAAAAAA", "folderCCCCCC"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 1,
@@ -1197,17 +1286,31 @@ fn deduping_local_newer() {
             ("bookmarkAAA2", Bookmark[needs_merge = true]),
             ("bookmarkAAA3", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("bookmarkAAA1".into(),
-                              Content::Bookmark { title: "A".into(),
-                                                  url_href: "http://example.com/a".into(), });
-    new_local_contents.insert("bookmarkAAA2".into(),
-                              Content::Bookmark { title: "A".into(),
-                                                  url_href: "http://example.com/a".into(), });
-    new_local_contents.insert("bookmarkAAA3".into(),
-                              Content::Bookmark { title: "A".into(),
-                                                  url_href: "http://example.com/a".into(), });
+    new_local_contents.insert(
+        "bookmarkAAA1".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
+    new_local_contents.insert(
+        "bookmarkAAA2".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
+    new_local_contents.insert(
+        "bookmarkAAA3".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
@@ -1215,19 +1318,31 @@ fn deduping_local_newer() {
             ("bookmarkAAA4", Bookmark[needs_merge = true, age = 5]),
             ("bookmarkAAA5", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("bookmarkAAAA".into(),
-                               Content::Bookmark { title: "A".into(),
-                                                   url_href: "http://example.com/a".into(), });
-    new_remote_contents.insert("bookmarkAAA4".into(),
-                               Content::Bookmark { title: "A".into(),
-                                                   url_href: "http://example.com/a".into(), });
+    new_remote_contents.insert(
+        "bookmarkAAAA".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "bookmarkAAA4".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
 
-    let mut merger = Merger::with_contents(&local_tree,
-                                           &new_local_contents,
-                                           &remote_tree,
-                                           &new_remote_contents);
+    let mut merger = Merger::with_contents(
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1239,7 +1354,9 @@ fn deduping_local_newer() {
             ("bookmarkAAA3", Bookmark[needs_merge = true]),
             ("bookmarkAAA5", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1290,24 +1407,41 @@ fn deduping_remote_newer() {
             // Should dedupe to `queryIIIIII1`.
             ("queryIIIIIII", Query[needs_merge = true, age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("bookmarkCCCC".into(),
-                              Content::Bookmark { title: "C".into(),
-                                                  url_href: "http://example.com/c".into() });
-    new_local_contents.insert("folderDDDDDD".into(),
-                              Content::Folder { title: "D".into() });
-    new_local_contents.insert("bookmarkEEEE".into(),
-                              Content::Bookmark { title: "E".into(),
-                                                  url_href: "http://example.com/e".into() });
+    new_local_contents.insert(
+        "bookmarkCCCC".into(),
+        Content::Bookmark {
+            title: "C".into(),
+            url_href: "http://example.com/c".into(),
+        },
+    );
+    new_local_contents.insert("folderDDDDDD".into(), Content::Folder { title: "D".into() });
+    new_local_contents.insert(
+        "bookmarkEEEE".into(),
+        Content::Bookmark {
+            title: "E".into(),
+            url_href: "http://example.com/e".into(),
+        },
+    );
     new_local_contents.insert("separatorFFF".into(), Content::Separator { position: 1 });
     new_local_contents.insert("separatorGGG".into(), Content::Separator { position: 2 });
-    new_local_contents.insert("bookmarkHHHH".into(),
-                              Content::Bookmark { title: "H".into(),
-                                                  url_href: "http://example.com/h".into() });
-    new_local_contents.insert("queryIIIIIII".into(),
-                              Content::Bookmark { title: "I".into(),
-                                                  url_href: "place:maxResults=10&sort=8".into() });
+    new_local_contents.insert(
+        "bookmarkHHHH".into(),
+        Content::Bookmark {
+            title: "H".into(),
+            url_href: "http://example.com/h".into(),
+        },
+    );
+    new_local_contents.insert(
+        "queryIIIIIII".into(),
+        Content::Bookmark {
+            title: "I".into(),
+            url_href: "place:maxResults=10&sort=8".into(),
+        },
+    );
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -1323,29 +1457,48 @@ fn deduping_remote_newer() {
             ("bookmarkHHH1", Bookmark[needs_merge = true]),
             ("queryIIIIII1", Query[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("bookmarkCCC1".into(),
-                               Content::Bookmark { title: "C".into(),
-                                                   url_href: "http://example.com/c1".into() });
-    new_remote_contents.insert("folderDDDDD1".into(),
-                               Content::Folder { title: "D".into() });
-    new_remote_contents.insert("bookmarkEEE1".into(),
-                               Content::Bookmark { title: "E".into(),
-                                                   url_href: "http://example.com/e".into() });
+    new_remote_contents.insert(
+        "bookmarkCCC1".into(),
+        Content::Bookmark {
+            title: "C".into(),
+            url_href: "http://example.com/c1".into(),
+        },
+    );
+    new_remote_contents.insert("folderDDDDD1".into(), Content::Folder { title: "D".into() });
+    new_remote_contents.insert(
+        "bookmarkEEE1".into(),
+        Content::Bookmark {
+            title: "E".into(),
+            url_href: "http://example.com/e".into(),
+        },
+    );
     new_remote_contents.insert("separatorFF1".into(), Content::Separator { position: 1 });
     new_remote_contents.insert("separatorGG1".into(), Content::Separator { position: 2 });
-    new_remote_contents.insert("bookmarkHHH1".into(),
-                               Content::Bookmark { title: "H".into(),
-                                                   url_href: "http://example.com/h".into() });
-    new_remote_contents.insert("queryIIIIII1".into(),
-                               Content::Bookmark { title: "I".into(),
-                                                   url_href: "place:maxResults=10&sort=8".into() });
+    new_remote_contents.insert(
+        "bookmarkHHH1".into(),
+        Content::Bookmark {
+            title: "H".into(),
+            url_href: "http://example.com/h".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "queryIIIIII1".into(),
+        Content::Bookmark {
+            title: "I".into(),
+            url_href: "place:maxResults=10&sort=8".into(),
+        },
+    );
 
-    let mut merger = Merger::with_contents(&local_tree,
-                                           &new_local_contents,
-                                           &remote_tree,
-                                           &new_remote_contents);
+    let mut merger = Merger::with_contents(
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1365,7 +1518,9 @@ fn deduping_remote_newer() {
             ("bookmarkHHH1", Bookmark),
             ("queryIIIIII1", Query)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1401,26 +1556,41 @@ fn complex_deduping() {
                 ("bookmarkGGGG", Bookmark[needs_merge = true, age = 5])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("folderAAAAAA".into(),
-                              Content::Folder { title: "A".into() });
-    new_local_contents.insert("bookmarkBBBB".into(),
-                              Content::Bookmark { title: "B".into(),
-                                                  url_href: "http://example.com/b".into() });
-    new_local_contents.insert("bookmarkCCCC".into(),
-                              Content::Bookmark { title: "C".into(),
-                                                  url_href: "http://example.com/c".into() });
-    new_local_contents.insert("folderDDDDDD".into(),
-                              Content::Folder { title: "D".into() });
-    new_local_contents.insert("bookmarkEEEE".into(),
-                              Content::Bookmark { title: "E".into(),
-                                                  url_href: "http://example.com/e".into() });
-    new_local_contents.insert("folderFFFFFF".into(),
-                              Content::Folder { title: "F".into() });
-    new_local_contents.insert("bookmarkGGGG".into(),
-                              Content::Bookmark { title: "G".into(),
-                                                  url_href: "http://example.com/g".into() });
+    new_local_contents.insert("folderAAAAAA".into(), Content::Folder { title: "A".into() });
+    new_local_contents.insert(
+        "bookmarkBBBB".into(),
+        Content::Bookmark {
+            title: "B".into(),
+            url_href: "http://example.com/b".into(),
+        },
+    );
+    new_local_contents.insert(
+        "bookmarkCCCC".into(),
+        Content::Bookmark {
+            title: "C".into(),
+            url_href: "http://example.com/c".into(),
+        },
+    );
+    new_local_contents.insert("folderDDDDDD".into(), Content::Folder { title: "D".into() });
+    new_local_contents.insert(
+        "bookmarkEEEE".into(),
+        Content::Bookmark {
+            title: "E".into(),
+            url_href: "http://example.com/e".into(),
+        },
+    );
+    new_local_contents.insert("folderFFFFFF".into(), Content::Folder { title: "F".into() });
+    new_local_contents.insert(
+        "bookmarkGGGG".into(),
+        Content::Bookmark {
+            title: "G".into(),
+            url_href: "http://example.com/g".into(),
+        },
+    );
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
@@ -1435,31 +1605,48 @@ fn complex_deduping() {
                 ("bookmarkHHH1", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("folderAAAAA1".into(),
-                               Content::Folder { title: "A".into() });
-    new_remote_contents.insert("bookmarkBBB1".into(),
-                               Content::Bookmark { title: "B".into(),
-                                                   url_href: "http://example.com/b".into() });
-    new_remote_contents.insert("folderDDDDD1".into(),
-                               Content::Folder { title: "D".into() });
-    new_remote_contents.insert("bookmarkEEE1".into(),
-                               Content::Bookmark { title: "E".into(),
-                                                   url_href: "http://example.com/e".into() });
-    new_remote_contents.insert("folderFFFFF1".into(),
-                               Content::Folder { title: "F".into() });
-    new_remote_contents.insert("bookmarkGGG1".into(),
-                               Content::Bookmark { title: "G".into(),
-                                                   url_href: "http://example.com/g".into() });
-    new_remote_contents.insert("bookmarkHHH1".into(),
-                               Content::Bookmark { title: "H".into(),
-                                                   url_href: "http://example.com/h".into() });
+    new_remote_contents.insert("folderAAAAA1".into(), Content::Folder { title: "A".into() });
+    new_remote_contents.insert(
+        "bookmarkBBB1".into(),
+        Content::Bookmark {
+            title: "B".into(),
+            url_href: "http://example.com/b".into(),
+        },
+    );
+    new_remote_contents.insert("folderDDDDD1".into(), Content::Folder { title: "D".into() });
+    new_remote_contents.insert(
+        "bookmarkEEE1".into(),
+        Content::Bookmark {
+            title: "E".into(),
+            url_href: "http://example.com/e".into(),
+        },
+    );
+    new_remote_contents.insert("folderFFFFF1".into(), Content::Folder { title: "F".into() });
+    new_remote_contents.insert(
+        "bookmarkGGG1".into(),
+        Content::Bookmark {
+            title: "G".into(),
+            url_href: "http://example.com/g".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "bookmarkHHH1".into(),
+        Content::Bookmark {
+            title: "H".into(),
+            url_href: "http://example.com/h".into(),
+        },
+    );
 
-    let mut merger = Merger::with_contents(&local_tree,
-                                           &new_local_contents,
-                                           &remote_tree,
-                                           &new_remote_contents);
+    let mut merger = Merger::with_contents(
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1478,7 +1665,9 @@ fn complex_deduping() {
                 ("bookmarkHHH1", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1510,14 +1699,18 @@ fn left_pane_root() {
                 ("folderLEFTPC", Query[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true]).into_tree().unwrap();
+    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true])
+        .into_tree()
+        .unwrap();
     let expected_deletions = vec![
         "folderLEFTPC",
         "folderLEFTPF",
@@ -1564,7 +1757,9 @@ fn non_syncable_items() {
             }),
             ("bookmarkFFFF", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("unfiled_____", Folder[needs_merge = true], {
@@ -1597,7 +1792,9 @@ fn non_syncable_items() {
                 ("folderLEFTPC", Query[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1612,7 +1809,9 @@ fn non_syncable_items() {
             ("bookmarkJJJJ", Bookmark[needs_merge = true]),
             ("bookmarkGGGG", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_deletions = vec![
         "bookmarkEEEE", // Non-syncable locally.
         "bookmarkFFFF", // Non-syncable locally.
@@ -1653,7 +1852,9 @@ fn applying_two_empty_folders_doesnt_smush() {
             ("emptyempty01", Folder[needs_merge = true]),
             ("emptyempty02", Folder[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1665,7 +1866,9 @@ fn applying_two_empty_folders_doesnt_smush() {
             ("emptyempty01", Folder),
             ("emptyempty02", Folder)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 3,
         ..StructureCounts::default()
@@ -1688,12 +1891,22 @@ fn applying_two_empty_folders_matches_only_one() {
             ("emptyempty02", Folder[needs_merge = true]),
             ("emptyemptyL0", Folder[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("emptyempty02".into(),
-                              Content::Folder { title: "Empty".into() });
-    new_local_contents.insert("emptyemptyL0".into(),
-                              Content::Folder { title: "Empty".into() });
+    new_local_contents.insert(
+        "emptyempty02".into(),
+        Content::Folder {
+            title: "Empty".into(),
+        },
+    );
+    new_local_contents.insert(
+        "emptyemptyL0".into(),
+        Content::Folder {
+            title: "Empty".into(),
+        },
+    );
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true], {
@@ -1701,19 +1914,35 @@ fn applying_two_empty_folders_matches_only_one() {
             ("emptyempty02", Folder[needs_merge = true]),
             ("emptyempty03", Folder[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("emptyempty01".into(),
-                               Content::Folder { title: "Empty".into() });
-    new_remote_contents.insert("emptyempty02".into(),
-                               Content::Folder { title: "Empty".into() });
-    new_remote_contents.insert("emptyempty03".into(),
-                               Content::Folder { title: "Empty".into() });
+    new_remote_contents.insert(
+        "emptyempty01".into(),
+        Content::Folder {
+            title: "Empty".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "emptyempty02".into(),
+        Content::Folder {
+            title: "Empty".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "emptyempty03".into(),
+        Content::Folder {
+            title: "Empty".into(),
+        },
+    );
 
-    let mut merger = Merger::with_contents(&local_tree,
-                                           &new_local_contents,
-                                           &remote_tree,
-                                           &new_remote_contents);
+    let mut merger = Merger::with_contents(
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1724,7 +1953,9 @@ fn applying_two_empty_folders_matches_only_one() {
             ("emptyempty02", Folder),
             ("emptyempty03", Folder)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1753,30 +1984,52 @@ fn deduping_ignores_parent_title() {
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAA1", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("mobile______".into(),
-                              Content::Folder { title: "Favoritos do celular".into() });
-    new_local_contents.insert("bookmarkAAA1".into(),
-                              Content::Bookmark { title: "A".into(),
-                                                  url_href: "http://example.com/a".into() });
+    new_local_contents.insert(
+        "mobile______".into(),
+        Content::Folder {
+            title: "Favoritos do celular".into(),
+        },
+    );
+    new_local_contents.insert(
+        "bookmarkAAA1".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("mobile______".into(),
-                               Content::Folder { title: "Mobile Bookmarks".into() });
-    new_remote_contents.insert("bookmarkAAAA".into(),
-                               Content::Bookmark { title: "A".into(),
-                                                   url_href: "http://example.com/a".into() });
+    new_remote_contents.insert(
+        "mobile______".into(),
+        Content::Folder {
+            title: "Mobile Bookmarks".into(),
+        },
+    );
+    new_remote_contents.insert(
+        "bookmarkAAAA".into(),
+        Content::Bookmark {
+            title: "A".into(),
+            url_href: "http://example.com/a".into(),
+        },
+    );
 
-    let mut merger = Merger::with_contents(&local_tree,
-                                           &new_local_contents,
-                                           &remote_tree,
-                                           &new_remote_contents);
+    let mut merger = Merger::with_contents(
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1785,7 +2038,9 @@ fn deduping_ignores_parent_title() {
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1813,14 +2068,18 @@ fn mismatched_compatible_bookmark_kinds() {
             ("queryAAAAAAA", Query[needs_merge = true]),
             ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("queryAAAAAAA", Bookmark[needs_merge = true, age = 5]),
             ("bookmarkBBBB", Query[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1832,7 +2091,9 @@ fn mismatched_compatible_bookmark_kinds() {
             ("queryAAAAAAA", Query[needs_merge = true]),
             ("bookmarkBBBB", Query)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 3,
         ..StructureCounts::default()
@@ -1854,21 +2115,25 @@ fn mismatched_incompatible_bookmark_kinds() {
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkAAAA", Folder[needs_merge = true, age = 5])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     match merger.merge() {
         Ok(_) => panic!("Should not merge trees with mismatched kinds"),
         Err(err) => {
             match err.kind() {
-                ErrorKind::MismatchedItemKind { .. } => {},
-                kind => panic!("Got {:?} merging trees with mismatched kinds", kind)
+                ErrorKind::MismatchedItemKind { .. } => {}
+                kind => panic!("Got {:?} merging trees with mismatched kinds", kind),
             };
         }
     };
@@ -1885,13 +2150,11 @@ fn invalid_guids() {
         fn generate_new_guid(&self, old_guid: &Guid) -> Result<Guid> {
             let count = self.0.get();
             self.0.set(count + 1);
-            assert!(&[
-                ")(*&",
-                "shortGUID",
-                "loooooongGUID",
-                "!@#$%^",
-                "",
-            ].contains(&old_guid.as_str()), "Didn't expect to generate new GUID for {}", old_guid);
+            assert!(
+                &[")(*&", "shortGUID", "loooooongGUID", "!@#$%^", "",].contains(&old_guid.as_str()),
+                "Didn't expect to generate new GUID for {}",
+                old_guid
+            );
             Ok(format!("item{:0>8}", count).into())
         }
     }
@@ -1906,7 +2169,9 @@ fn invalid_guids() {
             ("shortGUID", Bookmark[needs_merge = true]),
             ("loooooongGUID", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let new_local_contents: HashMap<Guid, Content> = HashMap::new();
 
     let remote_tree = nodes!({
@@ -1920,15 +2185,19 @@ fn invalid_guids() {
             ("bookmarkAAAA", Bookmark[needs_merge = true]),
             ("bookmarkBBBB", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
     let driver = GenerateNewGuid::default();
-    let mut merger = Merger::with_driver(&driver,
-                                         &local_tree,
-                                         &new_local_contents,
-                                         &remote_tree,
-                                         &new_remote_contents);
+    let mut merger = Merger::with_driver(
+        &driver,
+        &local_tree,
+        &new_local_contents,
+        &remote_tree,
+        &new_remote_contents,
+    );
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1945,13 +2214,10 @@ fn invalid_guids() {
             ("item00000003", Bookmark[needs_merge = true]),
             ("item00000004", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
-    let expected_deletions = vec![
-        "",
-        "!@#$%^",
-        "loooooongGUID",
-        "shortGUID",
-    ];
+    })
+    .into_tree()
+    .unwrap();
+    let expected_deletions = vec!["", "!@#$%^", "loooooongGUID", "shortGUID"];
     let expected_telem = StructureCounts {
         merged_nodes: 9,
         merged_deletions: 4,
@@ -1992,7 +2258,9 @@ fn multiple_parents() {
                 ("bookmarkDDDD", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -2013,7 +2281,9 @@ fn multiple_parents() {
                 ("bookmarkHHHH", Bookmark)
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 10,
         ..StructureCounts::default()
@@ -2039,7 +2309,9 @@ fn reparent_orphans() {
         ("unfiled_____", Folder, {
             ("bookmarkCCCC", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let mut remote_tree_builder = nodes!({
         ("toolbar_____", Folder[needs_merge = true], {
@@ -2050,7 +2322,9 @@ fn reparent_orphans() {
             ("bookmarkDDDD", Bookmark[needs_merge = true]),
             ("bookmarkCCCC", Bookmark)
         })
-    }).into_builder().unwrap();
+    })
+    .into_builder()
+    .unwrap();
     remote_tree_builder
         .item(Item {
             guid: "bookmarkEEEE".into(),
@@ -2089,7 +2363,9 @@ fn reparent_orphans() {
             ("bookmarkCCCC", Bookmark),
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 8,
         ..StructureCounts::default()
@@ -2111,7 +2387,9 @@ fn deleted_user_content_roots() {
         ("unfiled_____", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     local_tree.note_deleted("mobile______".into());
     local_tree.note_deleted("toolbar_____".into());
 
@@ -2119,12 +2397,13 @@ fn deleted_user_content_roots() {
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkBBBB", Bookmark[needs_merge = true])
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     remote_tree.note_deleted("unfiled_____".into());
     remote_tree.note_deleted("toolbar_____".into());
 
-    let mut merger = Merger::new(&local_tree,
-                                           &remote_tree);
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -2136,7 +2415,9 @@ fn deleted_user_content_roots() {
         ("mobile______", Folder, {
             ("bookmarkBBBB", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -2177,7 +2458,9 @@ fn moved_user_content_roots() {
         ("mobile______", Folder, {
             ("bookmarkFFFF", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true], {
@@ -2192,10 +2475,11 @@ fn moved_user_content_roots() {
                 ("bookmarkIIII", Bookmark[needs_merge = true])
             })
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
 
-    let mut merger = Merger::new(&local_tree,
-                                 &remote_tree);
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -2219,7 +2503,9 @@ fn moved_user_content_roots() {
             ("bookmarkGGGG", Bookmark),
             ("bookmarkEEEE", Bookmark)
         })
-    }).into_tree().unwrap();
+    })
+    .into_tree()
+    .unwrap();
     let expected_telem = StructureCounts {
         merged_nodes: 13,
         ..StructureCounts::default()
@@ -2239,20 +2525,25 @@ fn cycle() {
 
     // Try to create a cycle: move A into B, and B into the menu, but keep
     // B's parent by children as A.
-    let mut b = nodes!({
-        ("menu________", Folder)
-    }).into_builder().unwrap();
+    let mut b = nodes!({ ("menu________", Folder) }).into_builder().unwrap();
 
     b.item(Item::new("folderAAAAAA".into(), Kind::Folder))
-     .and_then(|p| p.by_parent_guid("folderBBBBBB".into()))
-     .expect("Should insert A");
+        .and_then(|p| p.by_parent_guid("folderBBBBBB".into()))
+        .expect("Should insert A");
 
     b.item(Item::new("folderBBBBBB".into(), Kind::Folder))
-     .and_then(|p| p.by_parent_guid("menu________".into()))
-     .and_then(|b| b.parent_for(&"folderBBBBBB".into()).by_children(&"folderAAAAAA".into()))
-     .expect("Should insert B");
+        .and_then(|p| p.by_parent_guid("menu________".into()))
+        .and_then(|b| {
+            b.parent_for(&"folderBBBBBB".into())
+                .by_children(&"folderAAAAAA".into())
+        })
+        .expect("Should insert B");
 
-    match b.into_tree().expect_err("Should not build tree with cycles").kind() {
+    match b
+        .into_tree()
+        .expect_err("Should not build tree with cycles")
+        .kind()
+    {
         ErrorKind::Cycle(guid) => assert_eq!(guid, &Guid::from("folderAAAAAA")),
         err @ _ => assert!(false, "Wrong error kind for cycle: {:?}", err),
     }

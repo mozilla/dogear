@@ -17,7 +17,7 @@ use std::{collections::HashMap, time::Duration};
 use crate::driver::{DefaultDriver, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
-use crate::merge::{Merger, Deletion, StructureCounts};
+use crate::merge::{Deletion, Merger, StructureCounts};
 use crate::tree::{Content, MergedDescendant, Tree};
 
 /// Records timings and counters for telemetry.
@@ -72,8 +72,11 @@ pub trait Store<E: From<Error>> {
     /// table, update Places, and stage outgoing items in another temp
     /// table. Afterward, we can inflate records on the JS side. On mobile,
     /// this flow might be simpler.
-    fn apply<'t>(&self, descendants: Vec<MergedDescendant<'t>>,
-                 deletions: Vec<Deletion>) -> Result<(), E>;
+    fn apply<'t>(
+        &self,
+        descendants: Vec<MergedDescendant<'t>>,
+        deletions: Vec<Deletion>,
+    ) -> Result<(), E>;
 
     /// Builds and applies a merged tree using the default merge driver.
     fn merge(&self) -> Result<Stats, E> {
@@ -85,9 +88,7 @@ pub trait Store<E: From<Error>> {
     /// given driver.
     fn merge_with_driver<D: Driver>(&self, driver: &D) -> Result<Stats, E> {
         let mut merge_timings = MergeTimings::default();
-        let local_tree = time!(merge_timings, fetch_local_tree, {
-            self.fetch_local_tree()
-        })?;
+        let local_tree = time!(merge_timings, fetch_local_tree, { self.fetch_local_tree() })?;
         debug!(driver, "Built local tree from mirror\n{}", local_tree);
 
         let new_local_contents = time!(merge_timings, fetch_new_local_contents, {
@@ -103,14 +104,31 @@ pub trait Store<E: From<Error>> {
             self.fetch_new_remote_contents()
         })?;
 
-        let mut merger = Merger::with_driver(driver, &local_tree,
-                                             &new_local_contents, &remote_tree,
-                                             &new_remote_contents);
+        let mut merger = Merger::with_driver(
+            driver,
+            &local_tree,
+            &new_local_contents,
+            &remote_tree,
+            &new_remote_contents,
+        );
         let merged_root = time!(merge_timings, merge, merger.merge())?;
-        debug!(driver, "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
-               merged_root.to_ascii_string(),
-               merger.delete_locally.iter().map(Guid::as_str).collect::<Vec<_>>().join(", "),
-               merger.delete_remotely.iter().map(Guid::as_str).collect::<Vec<_>>().join(", "));
+        debug!(
+            driver,
+            "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
+            merged_root.to_ascii_string(),
+            merger
+                .delete_locally
+                .iter()
+                .map(Guid::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+            merger
+                .delete_remotely
+                .iter()
+                .map(Guid::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
 
         if !merger.subsumes(&local_tree) {
             Err(E::from(ErrorKind::UnmergedLocalItems.into()))?;
@@ -119,11 +137,14 @@ pub trait Store<E: From<Error>> {
             Err(E::from(ErrorKind::UnmergedRemoteItems.into()))?;
         }
 
-        let descendants = merged_root.descendants_with_size_hint(
-            Some(merger.structure_counts.merged_nodes));
+        let descendants =
+            merged_root.descendants_with_size_hint(Some(merger.structure_counts.merged_nodes));
         let deletions = merger.deletions().collect::<Vec<_>>();
         time!(merge_timings, apply, self.apply(descendants, deletions))?;
 
-        Ok(Stats { timings: merge_timings, counts: merger.structure_counts.clone() })
+        Ok(Stats {
+            timings: merge_timings,
+            counts: merger.structure_counts.clone(),
+        })
     }
 }

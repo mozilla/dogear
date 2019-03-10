@@ -12,9 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp::Ordering, fmt, hash::{Hash, Hasher}, str, ops};
+use std::{
+    cmp::Ordering,
+    fmt,
+    hash::{Hash, Hasher},
+    ops, str,
+};
 
-use crate::error::{Result, ErrorKind};
+use crate::error::{ErrorKind, Result};
 
 #[derive(Clone)]
 pub struct Guid(Repr);
@@ -49,16 +54,16 @@ pub const USER_CONTENT_ROOTS: [Guid; 4] = [
     Guid(Repr::Valid(*b"mobile______")),
 ];
 
-const VALID_GUID_BYTES: [u8; 255] =
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
-     0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
-     0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0];
+const VALID_GUID_BYTES: [u8; 255] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 impl Guid {
     pub fn from_utf8(b: &[u8]) -> Result<Guid> {
@@ -135,9 +140,13 @@ impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     /// Equivalent to `PlacesUtils.isValidGuid`.
     #[inline]
     fn is_valid_guid(&self) -> bool {
-        self.len() == 12 && self.iter().all(|&byte| {
-            VALID_GUID_BYTES.get(byte.into()).map(|&b| b == 1).unwrap_or(false)
-        })
+        self.len() == 12
+            && self.iter().all(|&byte| {
+                VALID_GUID_BYTES
+                    .get(byte.into())
+                    .map(|&b| b == 1)
+                    .unwrap_or(false)
+            })
     }
 }
 
@@ -247,22 +256,20 @@ mod tests {
 
     #[test]
     fn is_valid() {
-        let valid_guids = &["bookmarkAAAA",
-                            "menu________",
-                            "__folderBB__",
-                            "queryAAAAAAA"];
+        let valid_guids = &[
+            "bookmarkAAAA",
+            "menu________",
+            "__folderBB__",
+            "queryAAAAAAA",
+        ];
         for s in valid_guids {
-            assert!(s.as_bytes().is_valid_guid(),
-                    "{:?} should validate",
-                    s);
+            assert!(s.as_bytes().is_valid_guid(), "{:?} should validate", s);
             assert!(Guid::from(*s).is_valid_guid());
         }
 
         let invalid_guids = &["bookmarkAAA", "folder!", "b@dgu1d!"];
         for s in invalid_guids {
-            assert!(!s.as_bytes().is_valid_guid(),
-                    "{:?} should not validate",
-                    s);
+            assert!(!s.as_bytes().is_valid_guid(), "{:?} should not validate", s);
             assert!(!Guid::from(*s).is_valid_guid());
         }
 

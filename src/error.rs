@@ -32,7 +32,7 @@ impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.kind() {
             ErrorKind::MalformedString(err) => Some(err.as_ref()),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -58,42 +58,35 @@ impl From<Utf8Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.kind() {
-            ErrorKind::MismatchedItemKind(local_kind, remote_kind) => {
-                write!(f, "Can't merge local kind {} and remote kind {}",
-                       local_kind, remote_kind)
-            },
-            ErrorKind::DuplicateItem(guid) => {
-                write!(f, "Item {} already exists in tree", guid)
-            },
-            ErrorKind::MissingItem(guid) => {
-                write!(f, "Item {} doesn't exist in tree", guid)
-            },
-            ErrorKind::InvalidParent(child_guid, parent_guid) => {
-                write!(f, "Can't insert item {} into non-folder {}",
-                       child_guid, parent_guid)
-            },
-            ErrorKind::MissingParent(child_guid, parent_guid) => {
-                write!(f, "Can't insert item {} into nonexistent parent {}",
-                       child_guid, parent_guid)
-            },
-            ErrorKind::Cycle(guid) => {
-                write!(f, "Item {} can't contain itself", guid)
-            },
-            ErrorKind::MergeConflict => {
-                write!(f, "Local tree changed during merge")
-            },
+            ErrorKind::MismatchedItemKind(local_kind, remote_kind) => write!(
+                f,
+                "Can't merge local kind {} and remote kind {}",
+                local_kind, remote_kind
+            ),
+            ErrorKind::DuplicateItem(guid) => write!(f, "Item {} already exists in tree", guid),
+            ErrorKind::MissingItem(guid) => write!(f, "Item {} doesn't exist in tree", guid),
+            ErrorKind::InvalidParent(child_guid, parent_guid) => write!(
+                f,
+                "Can't insert item {} into non-folder {}",
+                child_guid, parent_guid
+            ),
+            ErrorKind::MissingParent(child_guid, parent_guid) => write!(
+                f,
+                "Can't insert item {} into nonexistent parent {}",
+                child_guid, parent_guid
+            ),
+            ErrorKind::Cycle(guid) => write!(f, "Item {} can't contain itself", guid),
+            ErrorKind::MergeConflict => write!(f, "Local tree changed during merge"),
             ErrorKind::UnmergedLocalItems => {
                 write!(f, "Merged tree doesn't mention all items from local tree")
-            },
+            }
             ErrorKind::UnmergedRemoteItems => {
                 write!(f, "Merged tree doesn't mention all items from remote tree")
-            },
+            }
             ErrorKind::InvalidGuid(invalid_guid) => {
                 write!(f, "Merged tree contains invalid GUID {}", invalid_guid)
-            },
-            ErrorKind::InvalidByte(b) => {
-                write!(f, "Invalid byte {} in UTF-16 encoding", b)
-            },
+            }
+            ErrorKind::InvalidByte(b) => write!(f, "Invalid byte {} in UTF-16 encoding", b),
             ErrorKind::MalformedString(err) => err.fmt(f),
         }
     }
