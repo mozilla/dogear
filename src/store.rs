@@ -14,7 +14,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use crate::driver::Driver;
+use crate::driver::{DefaultDriver, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Merger, Deletion, StructureCounts};
@@ -48,7 +48,7 @@ macro_rules! time {
     }};
 }
 
-pub trait Store<D: Driver, E: From<Error>> {
+pub trait Store<E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the local store.
     fn fetch_local_tree(&self) -> Result<Tree, E>;
@@ -72,10 +72,18 @@ pub trait Store<D: Driver, E: From<Error>> {
     /// table, update Places, and stage outgoing items in another temp
     /// table. Afterward, we can inflate records on the JS side. On mobile,
     /// this flow might be simpler.
-    fn apply<'t>(&mut self, descendants: Vec<MergedDescendant<'t>>,
+    fn apply<'t>(&self, descendants: Vec<MergedDescendant<'t>>,
                  deletions: Vec<Deletion>) -> Result<(), E>;
 
-    fn merge(&mut self, driver: &D) -> Result<Stats, E> {
+    /// Builds and applies a merged tree using the default merge driver.
+    fn merge(&self) -> Result<Stats, E> {
+        self.merge_with_driver(&DefaultDriver)
+    }
+
+    /// Builds a complete merged tree from the local and remote trees, resolves
+    /// conflicts, dedupes local items, and applies the merged tree using the
+    /// given driver.
+    fn merge_with_driver<D: Driver>(&self, driver: &D) -> Result<Stats, E> {
         let mut merge_timings = MergeTimings::default();
         let local_tree = time!(merge_timings, fetch_local_tree, {
             self.fetch_local_tree()
