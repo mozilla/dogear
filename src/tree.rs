@@ -570,9 +570,11 @@ impl<'b> ParentBuilder<'b> {
         let parent_index = match self.0.entry_index_by_guid.get(parent_guid) {
             Some(&parent_index) if self.0.entries[parent_index].item.is_folder() => parent_index,
             _ => {
-                return Err(
-                    ErrorKind::InvalidParent(self.child_guid().clone(), parent_guid.clone()).into(),
-                );
+                return Err(ErrorKind::InvalidParent(
+                    self.child_guid().clone(),
+                    parent_guid.clone(),
+                )
+                .into());
             }
         };
         if let BuilderEntryChild::Exists(child_index) = &self.1 {
@@ -631,9 +633,11 @@ impl<'b> ParentBuilder<'b> {
         let parent_index = match self.0.entry_index_by_guid.get(parent_guid) {
             Some(&parent_index) if self.0.entries[parent_index].item.is_folder() => parent_index,
             _ => {
-                return Err(
-                    ErrorKind::InvalidParent(self.child_guid().clone(), parent_guid.clone()).into(),
-                );
+                return Err(ErrorKind::InvalidParent(
+                    self.child_guid().clone(),
+                    parent_guid.clone(),
+                )
+                .into());
             }
         };
         match &self.1 {
@@ -1085,6 +1089,67 @@ impl fmt::Display for Validity {
     }
 }
 
+/// The root of a merged tree.
+#[derive(Debug)]
+pub struct MergedRoot<'t> {
+    pub(crate) node: MergedNode<'t>,
+    pub(crate) size_hint: usize,
+}
+
+impl<'t> MergedRoot<'t> {
+    /// Returns a flattened `Vec` of the merged root's descendants.
+    pub fn descendants(&self) -> Vec<MergedDescendant> {
+        fn accumulate<'t>(
+            results: &mut Vec<MergedDescendant<'t>>,
+            merged_node: &'t MergedNode<'t>,
+            level: usize,
+        ) {
+            results.reserve(merged_node.merged_children.len());
+            for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
+                results.push(MergedDescendant {
+                    merged_parent_node: &merged_node,
+                    level: level + 1,
+                    position,
+                    merged_node: merged_child_node,
+                });
+                accumulate(results, merged_child_node, level + 1);
+            }
+        }
+        let mut results = Vec::with_capacity(self.size_hint);
+        accumulate(&mut results, &self.node, 0);
+        results
+    }
+
+    pub fn to_ascii_string(&self) -> String {
+        self.node.to_ascii_fragment("")
+    }
+}
+
+#[cfg(test)]
+impl<'t> IntoTree for MergedRoot<'t> {
+    fn into_tree(self) -> Result<Tree> {
+        fn to_item(merged_node: &MergedNode) -> Item {
+            let node = merged_node.merge_state.node();
+            let mut item = Item::new(merged_node.guid.clone(), node.kind);
+            item.age = node.age;
+            item.needs_merge = merged_node.merge_state.upload_reason() != UploadReason::None;
+            item
+        }
+
+        let mut b = Tree::with_root(to_item(&self.node));
+        for MergedDescendant {
+            merged_parent_node,
+            merged_node,
+            ..
+        } in self.descendants()
+        {
+            b.item(to_item(merged_node))?
+                .by_structure(&merged_parent_node.guid)?;
+        }
+        b.into_tree()
+    }
+}
+
 /// A merged bookmark node that indicates which side to prefer, and holds merged
 /// child nodes.
 #[derive(Debug)]
@@ -1103,52 +1168,11 @@ impl<'t> MergedNode<'t> {
         }
     }
 
-    /// Returns a `Vec` of the merged node's descendants.
-    pub fn descendants(&self) -> Vec<MergedDescendant> {
-        self.descendants_with_size_hint(None)
-    }
-
-    /// Builds a `Vec` of the merged node's descendants, optionally
-    /// preallocating enough space to hold them all. This avoids
-    /// extra allocations when the size of the entire merged tree is
-    /// known.
-    pub(crate) fn descendants_with_size_hint(
-        &self,
-        size_hint: Option<usize>,
-    ) -> Vec<MergedDescendant> {
-        fn accumulate<'t>(
-            results: &mut Vec<MergedDescendant<'t>>,
-            merged_node: &'t MergedNode<'t>,
-            level: usize,
-        ) {
-            results.reserve(merged_node.merged_children.len());
-            for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
-                results.push(MergedDescendant {
-                    merged_parent_node: &merged_node,
-                    level: level + 1,
-                    position,
-                    merged_node: merged_child_node,
-                });
-                accumulate(results, merged_child_node, level + 1);
-            }
-        }
-        let mut results = match size_hint {
-            Some(capacity) => Vec::with_capacity(capacity),
-            None => Vec::new(),
-        };
-        accumulate(&mut results, self, 0);
-        results
-    }
-
-    pub(crate) fn remote_guid_changed(&self) -> bool {
+    pub fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
             .map(|remote_node| remote_node.guid != self.guid)
             .unwrap_or(false)
-    }
-
-    pub fn to_ascii_string(&self) -> String {
-        self.to_ascii_fragment("")
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
@@ -1174,31 +1198,6 @@ impl<'t> MergedNode<'t> {
 impl<'t> fmt::Display for MergedNode<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.guid, self.merge_state)
-    }
-}
-
-#[cfg(test)]
-impl<'t> IntoTree for MergedNode<'t> {
-    fn into_tree(self) -> Result<Tree> {
-        fn to_item(merged_node: &MergedNode) -> Item {
-            let node = merged_node.merge_state.node();
-            let mut item = Item::new(merged_node.guid.clone(), node.kind);
-            item.age = node.age;
-            item.needs_merge = merged_node.merge_state.upload_reason() != UploadReason::None;
-            item
-        }
-
-        let mut b = Tree::with_root(to_item(&self));
-        for MergedDescendant {
-            merged_parent_node,
-            merged_node,
-            ..
-        } in self.descendants()
-        {
-            b.item(to_item(merged_node))?
-                .by_structure(&merged_parent_node.guid)?;
-        }
-        b.into_tree()
     }
 }
 

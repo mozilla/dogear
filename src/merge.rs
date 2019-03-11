@@ -20,7 +20,7 @@ use std::{
 use crate::driver::{DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, IsValidGuid};
-use crate::tree::{Content, Kind, MergeState, MergedNode, Node, Tree, Validity};
+use crate::tree::{Content, Kind, MergeState, MergedNode, MergedRoot, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -162,7 +162,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         }
     }
 
-    pub fn merge(&mut self) -> Result<MergedNode<'t>> {
+    pub fn merge(&mut self) -> Result<MergedRoot<'t>> {
         let merged_root_node = {
             let local_root_node = self.local_tree.root();
             let remote_root_node = self.remote_tree.root();
@@ -186,7 +186,10 @@ impl<'t, D: Driver> Merger<'t, D> {
             }
         }
 
-        Ok(merged_root_node)
+        Ok(MergedRoot {
+            node: merged_root_node,
+            size_hint: self.structure_counts.merged_nodes,
+        })
     }
 
     #[inline]

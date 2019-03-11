@@ -18,7 +18,7 @@ use crate::driver::{DefaultDriver, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Deletion, Merger, StructureCounts};
-use crate::tree::{Content, MergedDescendant, Tree};
+use crate::tree::{Content, MergedRoot, Tree};
 
 /// Records timings and counters for telemetry.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -67,15 +67,14 @@ pub trait Store<E: From<Error>> {
     /// these.
     fn fetch_new_remote_contents(&self) -> Result<HashMap<Guid, Content>, E>;
 
-    /// Applies the merged tree and stages items to upload. We keep this
-    /// generic: on Desktop, we'll insert the merged tree into a temp
-    /// table, update Places, and stage outgoing items in another temp
-    /// table. Afterward, we can inflate records on the JS side. On mobile,
-    /// this flow might be simpler.
+    /// Applies the merged root to the local store, and stages items for
+    /// upload. On Desktop, this method inserts the merged tree into a temp
+    /// table, updates Places, and inserts outgoing items into another
+    /// temp table.
     fn apply<'t>(
         &self,
-        descendants: Vec<MergedDescendant<'t>>,
-        deletions: Vec<Deletion>,
+        root: MergedRoot<'t>,
+        deletions: impl Iterator<Item = Deletion>,
     ) -> Result<(), E>;
 
     /// Builds and applies a merged tree using the default merge driver.
@@ -137,14 +136,15 @@ pub trait Store<E: From<Error>> {
             Err(E::from(ErrorKind::UnmergedRemoteItems.into()))?;
         }
 
-        let descendants =
-            merged_root.descendants_with_size_hint(Some(merger.structure_counts.merged_nodes));
-        let deletions = merger.deletions().collect::<Vec<_>>();
-        time!(merge_timings, apply, self.apply(descendants, deletions))?;
+        time!(
+            merge_timings,
+            apply,
+            self.apply(merged_root, merger.deletions())
+        )?;
 
         Ok(Stats {
             timings: merge_timings,
-            counts: merger.structure_counts.clone(),
+            counts: merger.structure_counts,
         })
     }
 }

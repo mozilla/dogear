@@ -30,6 +30,6 @@ pub use crate::guid::{Guid, MENU_GUID, MOBILE_GUID, ROOT_GUID, TOOLBAR_GUID, UNF
 pub use crate::merge::{Deletion, Merger, StructureCounts};
 pub use crate::store::{MergeTimings, Stats, Store};
 pub use crate::tree::{
-    Content, IntoTree, Item, Kind, MergeState, MergedDescendant, MergedNode, Tree, UploadReason,
-    Validity,
+    Content, IntoTree, Item, Kind, MergeState, MergedDescendant, MergedNode, MergedRoot, Tree,
+    UploadReason, Validity,
 };
