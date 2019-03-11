@@ -26,7 +26,7 @@ mod tests;
 
 pub use crate::driver::{DefaultDriver, Driver, LogLevel};
 pub use crate::error::{Error, ErrorKind, Result};
-pub use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID, USER_CONTENT_ROOTS};
+pub use crate::guid::{Guid, MENU_GUID, MOBILE_GUID, ROOT_GUID, TOOLBAR_GUID, UNFILED_GUID};
 pub use crate::merge::{Deletion, Merger, StructureCounts};
 pub use crate::store::{MergeTimings, Stats, Store};
 pub use crate::tree::{

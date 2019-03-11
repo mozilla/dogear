@@ -42,17 +42,17 @@ enum Repr {
 /// The Places root GUID, used to root all items in a bookmark tree.
 pub const ROOT_GUID: Guid = Guid(Repr::Valid(*b"root________"));
 
+/// The bookmarks toolbar GUID.
+pub const TOOLBAR_GUID: Guid = Guid(Repr::Valid(*b"toolbar_____"));
+
+/// The bookmarks menu GUID.
+pub const MENU_GUID: Guid = Guid(Repr::Valid(*b"menu________"));
+
 /// The "Other Bookmarks" GUID, used to hold items without a parent.
 pub const UNFILED_GUID: Guid = Guid(Repr::Valid(*b"unfiled_____"));
 
-/// The syncable Places roots. All synced items should descend from these
-/// roots.
-pub const USER_CONTENT_ROOTS: [Guid; 4] = [
-    Guid(Repr::Valid(*b"toolbar_____")),
-    Guid(Repr::Valid(*b"menu________")),
-    UNFILED_GUID,
-    Guid(Repr::Valid(*b"mobile______")),
-];
+/// The mobile bookmarks GUID.
+pub const MOBILE_GUID: Guid = Guid(Repr::Valid(*b"mobile______"));
 
 const VALID_GUID_BYTES: [u8; 255] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -122,7 +122,7 @@ impl Guid {
 
     #[inline]
     pub fn is_user_content_root(&self) -> bool {
-        USER_CONTENT_ROOTS.contains(self)
+        self == TOOLBAR_GUID || self == MENU_GUID || self == UNFILED_GUID || self == MOBILE_GUID
     }
 }
 
@@ -211,7 +211,7 @@ impl PartialOrd for Guid {
 impl PartialEq<str> for Guid {
     #[inline]
     fn eq(&self, other: &str) -> bool {
-        PartialEq::eq(self.as_str(), other)
+        self.as_str() == other
     }
 }
 
@@ -225,7 +225,14 @@ impl<'a> PartialEq<&'a str> for Guid {
 impl PartialEq for Guid {
     #[inline]
     fn eq(&self, other: &Guid) -> bool {
-        self.as_bytes().eq(other.as_bytes())
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl<'a> PartialEq<Guid> for &'a Guid {
+    #[inline]
+    fn eq(&self, other: &Guid) -> bool {
+        *self == other
     }
 }
 
