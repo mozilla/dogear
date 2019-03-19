@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use log::Log;
+use log::{LevelFilter, Log};
 
 use crate::error::{ErrorKind, Result};
 use crate::guid::Guid;
@@ -34,6 +34,12 @@ pub trait Driver {
     /// through all invalid GUIDs, as the tests do.
     fn generate_new_guid(&self, invalid_guid: &Guid) -> Result<Guid> {
         Err(ErrorKind::InvalidGuid(invalid_guid.clone()).into())
+    }
+
+    /// Returns the maximum log level for merge messages. The default
+    /// implementation returns the `log` crate's global maximum level.
+    fn max_log_level(&self) -> LevelFilter {
+        log::max_level()
     }
 
     /// Returns a logger for merge messages.
@@ -75,21 +81,22 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! log {
     ($level:ident, $driver:expr, $($args:tt)+) => {
-        let meta = log::Metadata::builder()
-            .level(log::Level::$level)
-            .target(module_path!())
-            .build();
-        if $driver.logger().enabled(&meta) {
-            $driver.logger().log(
-                &log::Record::builder()
-                    .args(format_args!($($args)+))
-                    .metadata(meta)
-                    .module_path(Some(module_path!()))
-                    .file(Some(file!()))
-                    .line(Some(line!()))
-                    .build(),
-            );
-            $driver.logger().flush();
+        if log::Level::$level <= $driver.max_log_level() {
+            let meta = log::Metadata::builder()
+                .level(log::Level::$level)
+                .target(module_path!())
+                .build();
+            if $driver.logger().enabled(&meta) {
+                $driver.logger().log(
+                    &log::Record::builder()
+                        .args(format_args!($($args)+))
+                        .metadata(meta)
+                        .module_path(Some(module_path!()))
+                        .file(Some(file!()))
+                        .line(Some(line!()))
+                        .build(),
+                );
+            }
         }
     };
 }
