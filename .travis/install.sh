@@ -15,4 +15,9 @@ chronic make install
 popd
 popd
 
+mkdir -p $HOME/.local/bin
+pushd $HOME/.local/bin
+tar xzf $HOME/.src/mdbook-$MDBOOK_VERSION.tar.gz
+popd
+
 popd
