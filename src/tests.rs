@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cell::Cell, collections::HashMap};
+use std::{cell::Cell, collections::HashMap, sync::Once};
+
+use env_logger;
 
 use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
@@ -87,7 +89,12 @@ macro_rules! nodes {
     }};
 }
 
-fn before_each() {}
+fn before_each() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        env_logger::init();
+    });
+}
 
 #[test]
 fn reparent_and_reposition() {

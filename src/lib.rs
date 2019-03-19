@@ -24,7 +24,7 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
-pub use crate::driver::{DefaultDriver, Driver, LogLevel};
+pub use crate::driver::{DefaultDriver, Driver};
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::guid::{Guid, MENU_GUID, MOBILE_GUID, ROOT_GUID, TOOLBAR_GUID, UNFILED_GUID};
 pub use crate::merge::{Deletion, Merger, StructureCounts};

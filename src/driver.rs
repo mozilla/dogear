@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Arguments;
+use log::Log;
 
 use crate::error::{ErrorKind, Result};
 use crate::guid::Guid;
@@ -36,29 +36,22 @@ pub trait Driver {
         Err(ErrorKind::InvalidGuid(invalid_guid.clone()).into())
     }
 
-    /// Returns the maximum level for log messages.
-    fn log_level(&self) -> LogLevel {
-        LogLevel::Silent
+    /// Returns a logger for merge messages.
+    ///
+    /// The default implementation returns the `log` crate's global logger.
+    ///
+    /// Implementations can override this method to return a custom logger,
+    /// where using the global logger won't work. For example, Firefox Desktop
+    /// has an existing Sync logging setup outside of the `log` crate.
+    fn logger(&self) -> &Log {
+        log::logger()
     }
-
-    /// Logs a message at the given log level.
-    fn log(&self, _level: LogLevel, _args: Arguments) {}
 }
 
 /// A default implementation of the merge driver.
 pub struct DefaultDriver;
 
 impl Driver for DefaultDriver {}
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum LogLevel {
-    Silent,
-    Error,
-    Warn,
-    Debug,
-    Trace,
-    All,
-}
 
 #[macro_export]
 macro_rules! error {
@@ -82,8 +75,21 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! log {
     ($level:ident, $driver:expr, $($args:tt)+) => {
-        if $driver.log_level() >= $crate::driver::LogLevel::$level {
-            $driver.log($crate::driver::LogLevel::$level, format_args!($($args)+));
+        let meta = log::Metadata::builder()
+            .level(log::Level::$level)
+            .target(module_path!())
+            .build();
+        if $driver.logger().enabled(&meta) {
+            $driver.logger().log(
+                &log::Record::builder()
+                    .args(format_args!($($args)+))
+                    .metadata(meta)
+                    .module_path(Some(module_path!()))
+                    .file(Some(file!()))
+                    .line(Some(line!()))
+                    .build(),
+            );
+            $driver.logger().flush();
         }
     };
 }
