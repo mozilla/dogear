@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use log::{LevelFilter, Log};
+use std::fmt::Arguments;
+
+use log::{Level, LevelFilter, Log};
 
 use crate::error::{ErrorKind, Result};
 use crate::guid::Guid;
@@ -59,44 +61,91 @@ pub struct DefaultDriver;
 
 impl Driver for DefaultDriver {}
 
+/// Logs a merge message.
+pub fn log<D: Driver>(
+    driver: &D,
+    level: Level,
+    args: Arguments,
+    module_path: &'static str,
+    file: &'static str,
+    line: u32,
+) {
+    let meta = log::Metadata::builder()
+        .level(level)
+        .target(module_path)
+        .build();
+    if driver.logger().enabled(&meta) {
+        driver.logger().log(
+            &log::Record::builder()
+                .args(args)
+                .metadata(meta)
+                .module_path(Some(module_path))
+                .file(Some(file))
+                .line(Some(line))
+                .build(),
+        );
+    }
+}
+
 #[macro_export]
 macro_rules! error {
-    ($driver:expr, $($args:tt)+) => (log!(Error, $driver, $($args)+));
+    ($driver:expr, $($args:tt)+) => {
+        if log::Level::Error <= $driver.max_log_level() {
+            $crate::driver::log(
+                $driver,
+                log::Level::Error,
+                format_args!($($args)+),
+                module_path!(),
+                file!(),
+                line!(),
+            );
+        }
+    }
 }
 
 macro_rules! warn {
-    ($driver:expr, $($args:tt)+) => (log!(Warn, $driver, $($args)+));
+    ($driver:expr, $($args:tt)+) => {
+        if log::Level::Warn <= $driver.max_log_level() {
+            $crate::driver::log(
+                $driver,
+                log::Level::Warn,
+                format_args!($($args)+),
+                module_path!(),
+                file!(),
+                line!(),
+            );
+        }
+    }
 }
 
 #[macro_export]
 macro_rules! debug {
-    ($driver:expr, $($args:tt)+) => (log!(Debug, $driver, $($args)+));
+    ($driver:expr, $($args:tt)+) => {
+        if log::Level::Debug <= $driver.max_log_level() {
+            $crate::driver::log(
+                $driver,
+                log::Level::Debug,
+                format_args!($($args)+),
+                module_path!(),
+                file!(),
+                line!(),
+            );
+        }
+    }
 }
 
 #[macro_export]
 macro_rules! trace {
-    ($driver:expr, $($args:tt)+) => (log!(Trace, $driver, $($args)+));
-}
-
-#[macro_export]
-macro_rules! log {
-    ($level:ident, $driver:expr, $($args:tt)+) => {
-        if log::Level::$level <= $driver.max_log_level() {
-            let meta = log::Metadata::builder()
-                .level(log::Level::$level)
-                .target(module_path!())
-                .build();
-            if $driver.logger().enabled(&meta) {
-                $driver.logger().log(
-                    &log::Record::builder()
-                        .args(format_args!($($args)+))
-                        .metadata(meta)
-                        .module_path(Some(module_path!()))
-                        .file(Some(file!()))
-                        .line(Some(line!()))
-                        .build(),
-                );
-            }
+    ($driver:expr, $($args:tt)+) => {
+        if log::Level::Trace <= $driver.max_log_level() {
+            $crate::driver::log(
+                $driver,
+                log::Level::Trace,
+                format_args!($($args)+),
+                module_path!(),
+                file!(),
+                line!(),
+            );
         }
-    };
+    }
 }
