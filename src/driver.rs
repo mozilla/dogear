@@ -51,7 +51,7 @@ pub trait Driver {
     /// Implementations can override this method to return a custom logger,
     /// where using the global logger won't work. For example, Firefox Desktop
     /// has an existing Sync logging setup outside of the `log` crate.
-    fn logger(&self) -> &Log {
+    fn logger(&self) -> &dyn Log {
         log::logger()
     }
 }
