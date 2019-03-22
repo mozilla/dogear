@@ -23,7 +23,7 @@ use std::{
 use smallbitvec::SmallBitVec;
 
 use crate::error::{ErrorKind, Result};
-use crate::guid::{Guid, ROOT_GUID};
+use crate::guid::Guid;
 
 /// The type for entry indices in the tree.
 type Index = usize;
@@ -46,26 +46,6 @@ pub struct Tree {
     entry_index_by_guid: HashMap<Guid, Index>,
     entries: Vec<TreeEntry>,
     deleted_guids: HashSet<Guid>,
-}
-
-impl Default for Tree {
-    fn default() -> Tree {
-        let root = Item::new(ROOT_GUID.clone(), Kind::Folder);
-
-        let mut entry_index_by_guid = HashMap::new();
-        entry_index_by_guid.insert(root.guid.clone(), 0);
-
-        Tree {
-            entry_index_by_guid,
-            entries: vec![TreeEntry {
-                item: root,
-                divergence: Divergence::Consistent,
-                parent_index: None,
-                child_indices: Vec::new(),
-            }],
-            deleted_guids: HashSet::new(),
-        }
-    }
 }
 
 impl Tree {
@@ -613,9 +593,9 @@ impl<'b> ParentBuilder<'b> {
     /// `by_structure(parent_guid)` is logically the same as:
     ///
     /// ```no_run
-    /// # use dogear::{Item, Result, Tree};
+    /// # use dogear::{Item, Kind, Result, ROOT_GUID, Tree};
     /// # fn main() -> Result<()> {
-    /// # let mut builder = Tree::with_root(Item::root());
+    /// # let mut builder = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder));
     /// # let child_guid = "bookmarkAAAA".into();
     /// # let parent_guid = "folderAAAAAA".into();
     /// builder.parent_for(&child_guid)
@@ -1012,11 +992,6 @@ impl Item {
             needs_merge: false,
             validity: Validity::Valid,
         }
-    }
-
-    #[inline]
-    pub fn root() -> Item {
-        Item::new(ROOT_GUID.clone(), Kind::Folder)
     }
 
     #[inline]

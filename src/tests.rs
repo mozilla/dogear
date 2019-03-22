@@ -25,7 +25,7 @@ use crate::tree::{Builder, Content, IntoTree, Item, Kind, Tree, Validity};
 #[derive(Debug)]
 struct Node {
     item: Item,
-    children: Vec<Box<Node>>,
+    children: Vec<Node>,
 }
 
 impl Node {
@@ -47,7 +47,7 @@ impl Node {
                 })?;
             b.parent_for(&guid).by_structure(&parent_guid)?;
             for child in node.children {
-                inflate(b, &guid, *child)?;
+                inflate(b, &guid, child)?;
             }
             Ok(())
         }
@@ -56,7 +56,7 @@ impl Node {
         let mut builder = Tree::with_root(self.item);
         builder.reparent_orphans_to(&UNFILED_GUID);
         for child in self.children {
-            inflate(&mut builder, &guid, *child)?;
+            inflate(&mut builder, &guid, child)?;
         }
         Ok(builder)
     }
@@ -1075,11 +1075,15 @@ fn locally_deleted_remotely_modified() {
 fn nonexistent_on_one_side() {
     before_each();
 
-    let mut local_tree = Tree::default();
+    let mut local_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
     // A doesn't exist remotely.
     local_tree.note_deleted("bookmarkAAAA".into());
 
-    let mut remote_tree = Tree::default();
+    let mut remote_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
     // B doesn't exist locally.
     remote_tree.note_deleted("bookmarkBBBB".into());
 
@@ -1088,7 +1092,9 @@ fn nonexistent_on_one_side() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({}).into_tree().unwrap();
+    let mut expected_root = Item::new(ROOT_GUID, Kind::Folder);
+    expected_root.needs_merge = true;
+    let expected_tree = Tree::with_root(expected_root).into_tree().unwrap();
     let expected_deletions = vec!["bookmarkAAAA", "bookmarkBBBB"];
     let expected_telem = StructureCounts {
         merged_deletions: 2,
@@ -1697,7 +1703,9 @@ fn complex_deduping() {
 fn left_pane_root() {
     before_each();
 
-    let local_tree = Tree::default();
+    let local_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
 
     let remote_tree = nodes!({
         ("folderLEFTPR", Folder[needs_merge = true], {
@@ -1852,7 +1860,9 @@ fn non_syncable_items() {
 fn applying_two_empty_folders_doesnt_smush() {
     before_each();
 
-    let local_tree = Tree::default();
+    let local_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
 
     let remote_tree = nodes!({
         ("mobile______", Folder[needs_merge = true], {
@@ -2245,7 +2255,9 @@ fn invalid_guids() {
 fn multiple_parents() {
     before_each();
 
-    let local_tree = Tree::default();
+    let local_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
 
     let remote_tree = nodes!({
         ("toolbar_____", Folder[age = 5], {
@@ -2552,6 +2564,6 @@ fn cycle() {
         .kind()
     {
         ErrorKind::Cycle(guid) => assert_eq!(guid, &Guid::from("folderAAAAAA")),
-        err @ _ => assert!(false, "Wrong error kind for cycle: {:?}", err),
+        err => assert!(false, "Wrong error kind for cycle: {:?}", err),
     }
 }
