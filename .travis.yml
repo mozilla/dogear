@@ -27,6 +27,7 @@ env:
   global:
     - KCOV_VERSION=36
     - PATH=$HOME/.local/bin:$PATH
+    - RUSTFLAGS="-C link-dead-code"
 
 before_install:
   - ./.travis/before_install.sh
