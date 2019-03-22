@@ -1064,15 +1064,28 @@ impl fmt::Display for Validity {
     }
 }
 
-/// The root of a merged tree.
+/// The root of a merged tree, from which all merged nodes descend.
 #[derive(Debug)]
 pub struct MergedRoot<'t> {
-    pub(crate) node: MergedNode<'t>,
-    pub(crate) size_hint: usize,
+    node: MergedNode<'t>,
+    size_hint: usize,
 }
 
 impl<'t> MergedRoot<'t> {
-    /// Returns a flattened `Vec` of the merged root's descendants.
+    /// Returns a merged root for the given node. `size_hint` indicates the
+    /// size of the tree, excluding the root, and is used to avoid extra
+    /// allocations for the descendants.
+    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot {
+        MergedRoot { node, size_hint }
+    }
+
+    /// Returns the root node.
+    pub fn node(&self) -> &MergedNode {
+        &self.node
+    }
+
+    /// Returns a flattened `Vec` of the root node's descendants, excluding the
+    /// root node itself.
     pub fn descendants(&self) -> Vec<MergedDescendant> {
         fn accumulate<'t>(
             results: &mut Vec<MergedDescendant<'t>>,
@@ -1095,6 +1108,8 @@ impl<'t> MergedRoot<'t> {
         results
     }
 
+    /// Returns an ASCII art representation of the root and its descendants,
+    /// similar to `Node::to_ascii_string`.
     pub fn to_ascii_string(&self) -> String {
         self.node.to_ascii_fragment("")
     }

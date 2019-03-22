@@ -187,10 +187,10 @@ impl<'t, D: Driver> Merger<'t, D> {
             }
         }
 
-        Ok(MergedRoot {
-            node: merged_root_node,
-            size_hint: self.structure_counts.merged_nodes,
-        })
+        Ok(MergedRoot::with_size(
+            merged_root_node,
+            self.structure_counts.merged_nodes,
+        ))
     }
 
     #[inline]
