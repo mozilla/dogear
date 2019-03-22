@@ -59,8 +59,8 @@ type MatchingDupes<'t> = (HashMap<Guid, Node<'t>>, HashMap<Guid, Node<'t>>);
 
 /// Represents an accepted local or remote deletion.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Deletion {
-    pub guid: Guid,
+pub struct Deletion<'t> {
+    pub guid: &'t Guid,
     pub local_level: i64,
     pub should_upload_tombstone: bool,
 }
@@ -103,8 +103,8 @@ pub struct Merger<'t, D = DefaultDriver> {
     new_remote_contents: Option<&'t HashMap<Guid, Content>>,
     matching_dupes_by_local_parent_guid: HashMap<Guid, MatchingDupes<'t>>,
     merged_guids: HashSet<Guid>,
-    pub(crate) delete_locally: HashSet<Guid>,
-    pub(crate) delete_remotely: HashSet<Guid>,
+    delete_locally: HashSet<Guid>,
+    delete_remotely: HashSet<Guid>,
     pub(crate) structure_counts: StructureCounts,
 }
 
@@ -197,12 +197,13 @@ impl<'t, D: Driver> Merger<'t, D> {
         tree.guids().all(|guid| self.mentions(guid))
     }
 
+    /// Returns an iterator for all accepted local and remote deletions.
     #[inline]
-    pub fn deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+    pub fn deletions(&self) -> impl Iterator<Item = Deletion> {
         self.local_deletions().chain(self.remote_deletions())
     }
 
-    fn local_deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+    pub(crate) fn local_deletions(&self) -> impl Iterator<Item = Deletion> {
         self.delete_locally.iter().filter_map(move |guid| {
             if self.delete_remotely.contains(guid) {
                 None
@@ -216,7 +217,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 // on the server, so we don't need to upload tombstones for
                 // these deletions.
                 Some(Deletion {
-                    guid: guid.clone(),
+                    guid,
                     local_level,
                     should_upload_tombstone: false,
                 })
@@ -224,7 +225,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         })
     }
 
-    fn remote_deletions<'m>(&'m self) -> impl Iterator<Item = Deletion> + 'm {
+    pub(crate) fn remote_deletions(&self) -> impl Iterator<Item = Deletion> {
         self.delete_remotely.iter().map(move |guid| {
             let local_level = self
                 .local_tree
@@ -232,7 +233,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 .map(|node| node.level())
                 .unwrap_or(-1);
             Deletion {
-                guid: guid.to_owned(),
+                guid,
                 local_level,
                 should_upload_tombstone: true,
             }

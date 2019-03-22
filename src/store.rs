@@ -74,7 +74,7 @@ pub trait Store<E: From<Error>> {
     fn apply<'t>(
         &self,
         root: MergedRoot<'t>,
-        deletions: impl Iterator<Item = Deletion>,
+        deletions: impl Iterator<Item = Deletion<'t>>,
     ) -> Result<(), E>;
 
     /// Builds and applies a merged tree using the default merge driver.
@@ -116,15 +116,13 @@ pub trait Store<E: From<Error>> {
             "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
             merged_root.to_ascii_string(),
             merger
-                .delete_locally
-                .iter()
-                .map(Guid::as_str)
+                .local_deletions()
+                .map(|d| d.guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
             merger
-                .delete_remotely
-                .iter()
-                .map(Guid::as_str)
+                .remote_deletions()
+                .map(|d| d.guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );

@@ -402,7 +402,7 @@ fn unchanged_newer_changed_older() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -878,7 +878,7 @@ fn complex_orphaning() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -977,7 +977,7 @@ fn locally_modified_remotely_deleted() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1064,7 +1064,7 @@ fn locally_deleted_remotely_modified() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1104,7 +1104,7 @@ fn nonexistent_on_one_side() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1191,7 +1191,7 @@ fn clear_folder_then_delete() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1282,7 +1282,7 @@ fn newer_move_to_deleted() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1740,7 +1740,7 @@ fn left_pane_root() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -1849,7 +1849,7 @@ fn non_syncable_items() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -2244,7 +2244,7 @@ fn invalid_guids() {
     let merged_tree = merged_root.into_tree().unwrap();
     assert_eq!(merged_tree, expected_tree);
 
-    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
     assert_eq!(deletions, expected_deletions);
 
@@ -2451,7 +2451,7 @@ fn deleted_user_content_roots() {
     assert_eq!(merged_tree, expected_tree);
 
     // TODO(lina): Remove invalid tombstones from both sides.
-    let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<Guid>>();
+    let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     assert_eq!(deletions, vec![Into::<Guid>::into("toolbar_____")]);
 
     assert_eq!(&merger.structure_counts, &expected_telem);
