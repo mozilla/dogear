@@ -74,20 +74,20 @@ pub trait Store<E: From<Error>> {
     /// table, updates Places, and inserts outgoing items into another
     /// temp table.
     fn apply<'t>(
-        &self,
+        &mut self,
         root: MergedRoot<'t>,
         deletions: impl Iterator<Item = Deletion<'t>>,
     ) -> Result<(), E>;
 
     /// Builds and applies a merged tree using the default merge driver.
-    fn merge(&self) -> Result<Stats, E> {
+    fn merge(&mut self) -> Result<Stats, E> {
         self.merge_with_driver(&DefaultDriver)
     }
 
     /// Builds a complete merged tree from the local and remote trees, resolves
     /// conflicts, dedupes local items, and applies the merged tree using the
     /// given driver.
-    fn merge_with_driver<D: Driver>(&self, driver: &D) -> Result<Stats, E> {
+    fn merge_with_driver<D: Driver>(&mut self, driver: &D) -> Result<Stats, E> {
         let mut merge_timings = MergeTimings::default();
         let local_tree = time!(merge_timings, fetch_local_tree, { self.fetch_local_tree() })?;
         debug!(driver, "Built local tree from mirror\n{}", local_tree);
