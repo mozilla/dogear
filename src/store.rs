@@ -142,7 +142,7 @@ pub trait Store<E: From<Error>> {
 
         Ok(Stats {
             timings: merge_timings,
-            counts: merger.structure_counts,
+            counts: *merger.counts(),
         })
     }
 }
