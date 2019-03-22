@@ -1150,7 +1150,8 @@ pub struct MergedNode<'t> {
 }
 
 impl<'t> MergedNode<'t> {
-    pub fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
+    /// Creates a merged node from the given merge state.
+    pub(crate) fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
         MergedNode {
             guid,
             merge_state,
@@ -1158,7 +1159,10 @@ impl<'t> MergedNode<'t> {
         }
     }
 
-    pub fn remote_guid_changed(&self) -> bool {
+    /// Indicates if the merged node exists remotely and has a new GUID. The
+    /// merger uses this to flag parents and children of remote nodes with
+    /// invalid GUIDs for reupload.
+    pub(crate) fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
             .map(|remote_node| remote_node.guid != self.guid)

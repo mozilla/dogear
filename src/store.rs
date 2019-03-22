@@ -38,7 +38,6 @@ pub struct MergeTimings {
     pub apply: Duration,
 }
 
-#[macro_export]
 macro_rules! time {
     ($timings:ident, $name:ident, $op:expr) => {{
         let now = std::time::Instant::now();

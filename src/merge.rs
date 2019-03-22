@@ -25,7 +25,7 @@ use crate::tree::{Content, Kind, MergeState, MergedNode, MergedRoot, Node, Tree,
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
 #[derive(Eq, PartialEq)]
-pub(crate) enum StructureChange {
+enum StructureChange {
     /// Node not deleted, or doesn't exist, on the other side.
     Unchanged,
     /// Node moved on the other side.
@@ -109,6 +109,7 @@ pub struct Merger<'t, D = DefaultDriver> {
     structure_counts: StructureCounts,
 }
 
+#[cfg(test)]
 impl<'t> Merger<'t, DefaultDriver> {
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
         Merger {
