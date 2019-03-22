@@ -28,9 +28,9 @@ use crate::guid::Guid;
 /// The type for entry indices in the tree.
 type Index = usize;
 
-/// Anything that can be turned into a tree. Both `Builder` and `Tree`
-/// implement this trait, allowing generic methods to return either.
+/// Anything that can be turned into a tree.
 pub trait IntoTree {
+    /// Performs the conversion.
     fn into_tree(self) -> Result<Tree>;
 }
 
@@ -65,27 +65,34 @@ impl Tree {
         }
     }
 
+    /// Returns the root node.
     #[inline]
     pub fn root(&self) -> Node {
         Node(self, &self.entries[0])
     }
 
+    /// Returns an iterator for all tombstoned GUIDs.
     #[inline]
-    pub fn deletions<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
+    pub fn deletions(&self) -> impl Iterator<Item = &Guid> {
         self.deleted_guids.iter()
     }
 
+    /// Indicates if the GUID is known to be deleted. If `Tree::node_for_guid`
+    /// returns `None` and `Tree::is_deleted` returns `false`, the item doesn't
+    /// exist in the tree at all.
     #[inline]
     pub fn is_deleted(&self, guid: &Guid) -> bool {
         self.deleted_guids.contains(guid)
     }
 
+    /// Notes a tombstone for a deleted item.
     #[inline]
     pub fn note_deleted(&mut self, guid: Guid) {
         self.deleted_guids.insert(guid);
     }
 
-    pub fn guids<'t>(&'t self) -> impl Iterator<Item = &Guid> + 't {
+    /// Returns an iterator for all node and tombstone GUIDs.
+    pub fn guids(&self) -> impl Iterator<Item = &Guid> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entries
             .iter()
@@ -984,6 +991,8 @@ pub struct Item {
 }
 
 impl Item {
+    /// Creates an item with the given kind.
+    #[inline]
     pub fn new(guid: Guid, kind: Kind) -> Item {
         Item {
             guid,
@@ -994,11 +1003,15 @@ impl Item {
         }
     }
 
+    /// Indicates if the item is a folder. Only folders are allowed to have
+    /// children.
     #[inline]
     pub fn is_folder(&self) -> bool {
         self.kind == Kind::Folder
     }
 
+    /// Indicates if the item can be merged with another item. Only items with
+    /// compatible kinds can be merged.
     #[inline]
     pub fn has_compatible_kind(&self, remote_node: &Item) -> bool {
         match (&self.kind, &remote_node.kind) {

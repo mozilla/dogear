@@ -111,6 +111,7 @@ pub struct Merger<'t, D = DefaultDriver> {
 
 #[cfg(test)]
 impl<'t> Merger<'t, DefaultDriver> {
+    /// Creates a merger with the default merge driver.
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
         Merger {
             driver: &DefaultDriver,
@@ -126,6 +127,7 @@ impl<'t> Merger<'t, DefaultDriver> {
         }
     }
 
+    /// Creates a merger with the default merge driver and contents.
     pub fn with_contents(
         local_tree: &'t Tree,
         new_local_contents: &'t HashMap<Guid, Content>,
@@ -143,6 +145,7 @@ impl<'t> Merger<'t, DefaultDriver> {
 }
 
 impl<'t, D: Driver> Merger<'t, D> {
+    /// Creates a merger with the given merge driver and contents.
     pub fn with_driver(
         driver: &'t D,
         local_tree: &'t Tree,
@@ -164,6 +167,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         }
     }
 
+    /// Builds a merged tree from the local and remote trees.
     pub fn merge(&mut self) -> Result<MergedRoot<'t>> {
         let merged_root_node = {
             let local_root_node = self.local_tree.root();
@@ -194,6 +198,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         ))
     }
 
+    /// Checks if the merger merged all GUIDs in the given tree.
     #[inline]
     pub fn subsumes(&self, tree: &Tree) -> bool {
         tree.guids().all(|guid| self.mentions(guid))

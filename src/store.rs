@@ -47,6 +47,9 @@ macro_rules! time {
     }};
 }
 
+/// A store is the main interface to Dogear. It implements methods for building
+/// local and remote trees from a storage backend, fetching content info for
+/// matching items with similar contents, and persisting the merged tree.
 pub trait Store<E: From<Error>> {
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the local store.
@@ -126,6 +129,9 @@ pub trait Store<E: From<Error>> {
                 .join(", ")
         );
 
+        // The merged tree should know about all items mentioned in the local
+        // and remote trees. Otherwise, it's incomplete, and we can't apply it.
+        // This indicates a bug in the merger.
         if !merger.subsumes(&local_tree) {
             Err(E::from(ErrorKind::UnmergedLocalItems.into()))?;
         }

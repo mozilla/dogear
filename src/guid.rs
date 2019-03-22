@@ -21,6 +21,7 @@ use std::{
 
 use crate::error::{ErrorKind, Result};
 
+/// A GUID for an item in a bookmark tree.
 #[derive(Clone)]
 pub struct Guid(Repr);
 
@@ -66,6 +67,7 @@ const VALID_GUID_BYTES: [u8; 255] = [
 ];
 
 impl Guid {
+    /// Converts a UTF-8 byte slice to a GUID.
     pub fn from_utf8(b: &[u8]) -> Result<Guid> {
         let repr = if b.is_valid_guid() {
             let mut bytes = [0u8; 12];
@@ -80,6 +82,7 @@ impl Guid {
         Ok(Guid(repr))
     }
 
+    /// Converts a UTF-16 byte slice to a GUID.
     pub fn from_utf16(b: &[u16]) -> Result<Guid> {
         let repr = if b.is_valid_guid() {
             let mut bytes = [0u8; 12];
@@ -99,6 +102,7 @@ impl Guid {
         Ok(Guid(repr))
     }
 
+    /// Returns the GUID as a byte slice.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match self.0 {
@@ -107,6 +111,7 @@ impl Guid {
         }
     }
 
+    /// Returns the GUID as a string slice.
     #[inline]
     pub fn as_str(&self) -> &str {
         // We actually could use from_utf8_unchecked here, and depending on how
@@ -120,6 +125,7 @@ impl Guid {
         }
     }
 
+    /// Indicates if the GUID is one of the four Places user content roots.
     #[inline]
     pub fn is_user_content_root(&self) -> bool {
         self == TOOLBAR_GUID || self == MENU_GUID || self == UNFILED_GUID || self == MOBILE_GUID
@@ -253,7 +259,7 @@ impl fmt::Debug for Guid {
 
 impl fmt::Display for Guid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self.as_str(), f)
+        f.write_str(self.as_str())
     }
 }
 
