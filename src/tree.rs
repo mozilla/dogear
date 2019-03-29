@@ -299,7 +299,8 @@ impl Builder {
                 BuilderEntryParent::Root => ResolvedParent::Root,
                 BuilderEntryParent::None => {
                     // The item doesn't have a `parentid` _or_ `children`.
-                    // Reparent to the default folder.
+                    // Reparent to the default folder (rule 4) or root
+                    // (rule 5).
                     let parent_index = self.reparent_orphans_to_default_index();
                     ResolvedParent::ByParentGuid(parent_index)
                 }
@@ -326,82 +327,13 @@ impl Builder {
                     }
 
                     parents => {
-                        // For items with zero, one, or more than two parents, we pick
-                        // the newest (minimum age), preferring parents from `children`
-                        // over `parentid` (rules 2-3).
+                        // For items with zero, one, or more than two parents,
+                        // pick the youngest (minimum age).
                         parents
                             .iter()
-                            .min_by(|parent, other_parent| {
-                                let (parent_index, other_parent_index) =
-                                    match (parent, other_parent) {
-                                        (
-                                            BuilderParentBy::Children(parent_index),
-                                            BuilderParentBy::Children(other_parent_index),
-                                        ) => (*parent_index, *other_parent_index),
-                                        (
-                                            BuilderParentBy::Children(_),
-                                            BuilderParentBy::KnownItem(_),
-                                        ) => {
-                                            return Ordering::Less;
-                                        }
-                                        (
-                                            BuilderParentBy::Children(_),
-                                            BuilderParentBy::UnknownItem(_),
-                                        ) => {
-                                            return Ordering::Less;
-                                        }
-
-                                        (
-                                            BuilderParentBy::KnownItem(parent_index),
-                                            BuilderParentBy::KnownItem(other_parent_index),
-                                        ) => (*parent_index, *other_parent_index),
-                                        (
-                                            BuilderParentBy::KnownItem(_),
-                                            BuilderParentBy::Children(_),
-                                        ) => {
-                                            return Ordering::Greater;
-                                        }
-                                        (
-                                            BuilderParentBy::KnownItem(_),
-                                            BuilderParentBy::UnknownItem(_),
-                                        ) => {
-                                            return Ordering::Less;
-                                        }
-
-                                        (
-                                            BuilderParentBy::UnknownItem(parent_guid),
-                                            BuilderParentBy::UnknownItem(other_parent_guid),
-                                        ) => {
-                                            match (
-                                                self.entry_index_by_guid.get(parent_guid),
-                                                self.entry_index_by_guid.get(other_parent_guid),
-                                            ) {
-                                                (Some(parent_index), Some(other_parent_index)) => {
-                                                    (*parent_index, *other_parent_index)
-                                                }
-                                                (Some(_), None) => return Ordering::Less,
-                                                (None, Some(_)) => return Ordering::Greater,
-                                                (None, None) => return Ordering::Equal,
-                                            }
-                                        }
-                                        (
-                                            BuilderParentBy::UnknownItem(_),
-                                            BuilderParentBy::Children(_),
-                                        ) => {
-                                            return Ordering::Greater;
-                                        }
-                                        (
-                                            BuilderParentBy::UnknownItem(_),
-                                            BuilderParentBy::KnownItem(_),
-                                        ) => {
-                                            return Ordering::Greater;
-                                        }
-                                    };
-                                let parent_entry = &self.entries[parent_index];
-                                let other_parent_entry = &self.entries[other_parent_index];
-                                parent_entry.item.age.cmp(&other_parent_entry.item.age)
-                            })
-                            .and_then(|parent_from| match parent_from {
+                            .map(|parent_by| PossibleParent::new(self, parent_by))
+                            .min()
+                            .and_then(|p| match p.parent_by {
                                 BuilderParentBy::Children(index) => {
                                     Some(ResolvedParent::ByChildren(*index))
                                 }
@@ -768,6 +700,85 @@ enum BuilderParentBy {
     /// resolved.
     KnownItem(Index),
 }
+
+// A possible parent for an item with conflicting parents. We use this wrapper's
+// `Ord` implementation to decide which parent is youngest.
+#[derive(Clone, Copy, Debug)]
+struct PossibleParent<'a> {
+    builder: &'a Builder,
+    parent_by: &'a BuilderParentBy,
+}
+
+impl<'a> PossibleParent<'a> {
+    fn new(builder: &'a Builder, parent_by: &'a BuilderParentBy) -> PossibleParent<'a> {
+        PossibleParent { builder, parent_by }
+    }
+}
+
+impl<'a> Ord for PossibleParent<'a> {
+    /// Compares two possible parents to determine which is younger
+    /// (`Ordering::Less`). Prefers parents from `children` over `parentid`
+    /// (rule 2), and `parentid`s that reference folders over non-folders
+    /// (rule 4).
+    fn cmp(&self, other: &PossibleParent) -> Ordering {
+        let (index, other_index) = match (&self.parent_by, &other.parent_by) {
+            (BuilderParentBy::Children(index), BuilderParentBy::Children(other_index)) => {
+                // Both `self` and `other` mention the item in their `children`.
+                (*index, *other_index)
+            }
+            (BuilderParentBy::Children(_), BuilderParentBy::KnownItem(_)) => {
+                // `self` mentions the item in its `children`, and the item's
+                // `parentid` is `other`, so prefer `self`.
+                return Ordering::Less;
+            }
+            (BuilderParentBy::Children(_), BuilderParentBy::UnknownItem(_)) => {
+                // As above, except we don't know if `other` exists. We don't
+                // need to look it up, though, because we can unconditionally
+                // prefer `self`.
+                return Ordering::Less;
+            }
+            (BuilderParentBy::KnownItem(_), BuilderParentBy::Children(_)) => {
+                // The item's `parentid` is `self`, and `other` mentions the
+                // item in its `children`, so prefer `other`.
+                return Ordering::Greater;
+            }
+            (BuilderParentBy::UnknownItem(_), BuilderParentBy::Children(_)) => {
+                // As above. We don't know if `self` exists, but we
+                // unconditionally prefer `other`.
+                return Ordering::Greater;
+            }
+            // Cases where `self` and `other` are `parentid`s, existing or not,
+            // are academic, since it doesn't make sense for an item to have
+            // multiple `parentid`s.
+            _ => return Ordering::Equal,
+        };
+        // If both `self` and `other` are folders, compare timestamps. If one is
+        // a folder, but the other isn't, we prefer the folder. If neither is a
+        // folder, it doesn't matter.
+        let entry = &self.builder.entries[index];
+        let other_entry = &self.builder.entries[other_index];
+        match (entry.item.is_folder(), other_entry.item.is_folder()) {
+            (true, true) => entry.item.age.cmp(&other_entry.item.age),
+            (false, true) => Ordering::Greater,
+            (true, false) => Ordering::Less,
+            (false, false) => Ordering::Equal,
+        }
+    }
+}
+
+impl<'a> PartialOrd for PossibleParent<'a> {
+    fn partial_cmp(&self, other: &PossibleParent) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'a> PartialEq for PossibleParent<'a> {
+    fn eq(&self, other: &PossibleParent) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl<'a> Eq for PossibleParent<'a> {}
 
 #[derive(Debug)]
 enum ResolvedParent {
