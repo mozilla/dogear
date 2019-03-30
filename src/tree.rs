@@ -47,6 +47,7 @@ pub struct Tree {
     entry_index_by_guid: HashMap<Guid, Index>,
     entries: Vec<TreeEntry>,
     deleted_guids: HashSet<Guid>,
+    problems: Problems,
 }
 
 impl Tree {
@@ -121,20 +122,26 @@ impl IntoTree for Tree {
 impl fmt::Display for Tree {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let root = self.root();
-        let deleted_guids = self
-            .deleted_guids
-            .iter()
-            .map(|guid| guid.as_ref())
-            .collect::<Vec<&str>>();
-        match deleted_guids.len() {
-            0 => write!(f, "{}", root.to_ascii_string()),
-            _ => write!(
-                f,
-                "{}\nDeleted: [{}]",
-                root.to_ascii_string(),
-                deleted_guids.join(",")
-            ),
+        f.write_str(&root.to_ascii_string())?;
+        if !self.deleted_guids.is_empty() {
+            f.write_str("\nDeleted: [")?;
+            for (i, guid) in self.deleted_guids.iter().enumerate() {
+                if i != 0 {
+                    f.write_str(", ")?;
+                }
+                f.write_str(guid.as_ref())?;
+            }
         }
+        if !self.problems.is_empty() {
+            f.write_str("\nProblems:\n")?;
+            for (i, summary) in self.problems.summarize().enumerate() {
+                if i != 0 {
+                    f.write_str("\n")?;
+                }
+                write!(f, "❗️ {}", summary)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -274,14 +281,21 @@ impl Builder {
         };
         ParentBuilder(self, entry_child)
     }
+}
 
-    /// Resolves parents for all entries. Returns a vector of resolved parents
-    /// by the entry index, and a lookup table for reparented orphans.
-    fn resolve(&self) -> (Vec<ResolvedParent>, HashMap<Index, Vec<Index>>) {
+impl IntoTree for Builder {
+    /// Builds a tree from all stored items and parent-child associations,
+    /// resolving inconsistencies like orphans, multiple parents, and
+    /// parent-child disagreements.
+    fn into_tree(self) -> Result<Tree> {
+        let mut problems = Problems::default();
+
+        // First, resolve parents for all entries, and build a lookup table for
+        // items without a position.
         let mut parents = Vec::with_capacity(self.entries.len());
         let mut reparented_child_indices_by_parent: HashMap<Index, Vec<Index>> = HashMap::new();
         for (entry_index, entry) in self.entries.iter().enumerate() {
-            let r = ResolveParent::new(&self, entry);
+            let r = ResolveParent::new(&self, entry, &mut problems);
             let resolved_parent = r.resolve();
             if let ResolvedParent::ByParentGuid(parent_index) = &resolved_parent {
                 // Reparented items are special: since they aren't mentioned in
@@ -296,18 +310,6 @@ impl Builder {
             }
             parents.push(resolved_parent);
         }
-        (parents, reparented_child_indices_by_parent)
-    }
-}
-
-impl IntoTree for Builder {
-    /// Builds a tree from all stored items and parent-child associations,
-    /// resolving inconsistencies like orphans, multiple parents, and
-    /// parent-child disagreements.
-    fn into_tree(self) -> Result<Tree> {
-        // First, resolve parents for all entries, and build a lookup table for
-        // items without a position.
-        let (parents, reparented_child_indices_by_parent) = self.resolve();
 
         // If any parents form cycles, abort. We haven't seen cyclic trees in
         // the wild, and breaking cycles would add complexity.
@@ -377,10 +379,12 @@ impl IntoTree for Builder {
                             divergence = Divergence::Diverged;
                         }
                     },
-                    BuilderEntryChild::Missing(_) => {
+                    BuilderEntryChild::Missing(guid) => {
                         // If the entry's `children` mentions a GUID for which
-                        // we don't have an entry, ignore the child.
+                        // we don't have an entry, note it as a problem, and
+                        // ignore the child.
                         divergence = Divergence::Diverged;
+                        problems.note(&entry.item.guid, Problem::MissingChild(guid.clone()));
                     }
                 }
             }
@@ -407,6 +411,7 @@ impl IntoTree for Builder {
             entry_index_by_guid: self.entry_index_by_guid,
             entries,
             deleted_guids: HashSet::new(),
+            problems,
         })
     }
 }
@@ -639,11 +644,20 @@ enum BuilderParentBy {
 struct ResolveParent<'a> {
     builder: &'a Builder,
     entry: &'a BuilderEntry,
+    problems: &'a mut Problems,
 }
 
 impl<'a> ResolveParent<'a> {
-    fn new(builder: &'a Builder, entry: &'a BuilderEntry) -> ResolveParent<'a> {
-        ResolveParent { builder, entry }
+    fn new(
+        builder: &'a Builder,
+        entry: &'a BuilderEntry,
+        problems: &'a mut Problems,
+    ) -> ResolveParent<'a> {
+        ResolveParent {
+            builder,
+            entry,
+            problems,
+        }
     }
 
     fn resolve(self) -> ResolvedParent {
@@ -709,6 +723,7 @@ impl<'a> ResolveParent<'a> {
             BuilderEntryParent::None => {
                 // Orphaned content root. This should only happen if the content
                 // root doesn't have a parent `by_parent_guid`.
+                self.problems.note(&self.entry.item.guid, Problem::Orphan);
                 ResolvedParent::ByParentGuid(0)
             }
             BuilderEntryParent::Root => {
@@ -719,12 +734,27 @@ impl<'a> ResolveParent<'a> {
                     ResolvedParent::ByStructure(*index)
                 } else {
                     // Move misparented content roots to the Places root.
+                    let guid = self.builder.entries[*index].item.guid.clone();
+                    self.problems
+                        .note(&self.entry.item.guid, Problem::MisparentedRoot(guid));
                     ResolvedParent::ByParentGuid(0)
                 }
             }
-            BuilderEntryParent::Partial(_) => {
+            BuilderEntryParent::Partial(parents_by) => {
                 // Ditto for content roots with multiple parents or parent-child
                 // disagreements.
+                for parent_by in parents_by {
+                    let guid = match parent_by {
+                        BuilderParentBy::Children(index) | BuilderParentBy::KnownItem(index) => {
+                            &self.builder.entries[*index].item.guid
+                        }
+                        BuilderParentBy::UnknownItem(guid) => guid,
+                    };
+                    self.problems.note(
+                        &self.entry.item.guid,
+                        Problem::MisparentedRoot(guid.clone()),
+                    );
+                }
                 ResolvedParent::ByParentGuid(0)
             }
         }
@@ -740,6 +770,7 @@ impl<'a> ResolveParent<'a> {
                 // any `children`. Reparent to the default folder (rule 4) or
                 // Places root (rule 5).
                 let parent_index = self.reparent_orphans_to_default_index();
+                self.problems.note(&self.entry.item.guid, Problem::Orphan);
                 ResolvedParent::ByParentGuid(parent_index)
             }
             BuilderEntryParent::Complete(index) => {
@@ -750,9 +781,14 @@ impl<'a> ResolveParent<'a> {
             BuilderEntryParent::Partial(parents) => {
                 // For items with one or more than two parents, pick the
                 // youngest (minimum age).
-                parents
-                    .iter()
-                    .map(|parent_by| PossibleParent::new(self.builder, parent_by))
+                let mut possible_parents = Vec::with_capacity(parents.len());
+                for parent_by in parents {
+                    let p = PossibleParent::new(self.builder, parent_by);
+                    self.problems.note(&self.entry.item.guid, p.problem());
+                    possible_parents.push(p);
+                }
+                possible_parents
+                    .into_iter()
                     .min()
                     .and_then(|p| match p.parent_by {
                         BuilderParentBy::Children(index) => {
@@ -806,6 +842,32 @@ struct PossibleParent<'a> {
 impl<'a> PossibleParent<'a> {
     fn new(builder: &'a Builder, parent_by: &'a BuilderParentBy) -> PossibleParent<'a> {
         PossibleParent { builder, parent_by }
+    }
+
+    /// Returns the problem with this conflicting parent: multiple parents,
+    /// parent-child disagreement, missing parent, or non-folder parent.
+    fn problem(&self) -> Problem {
+        let entry = match self.parent_by {
+            BuilderParentBy::Children(index) => {
+                return Problem::MultipleParents(self.builder.entries[*index].item.guid.clone());
+            }
+            BuilderParentBy::KnownItem(index) => {
+                return Problem::ParentChildDisagreement(
+                    self.builder.entries[*index].item.guid.clone(),
+                );
+            }
+            BuilderParentBy::UnknownItem(guid) => {
+                match self.builder.entry_index_by_guid.get(guid) {
+                    Some(index) => &self.builder.entries[*index],
+                    None => return Problem::MissingParentGuid(guid.clone()),
+                }
+            }
+        };
+        if entry.item.is_folder() {
+            Problem::ParentChildDisagreement(entry.item.guid.clone())
+        } else {
+            Problem::NonFolderParentGuid(entry.item.guid.clone())
+        }
     }
 }
 
@@ -943,6 +1005,87 @@ enum Divergence {
     Diverged,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Problem {
+    /// The item doesn't have a `parentid`, and isn't mentioned in any
+    /// folder's `children`.
+    Orphan,
+
+    /// The item is a user content root (menu, mobile, toolbar, or unfiled),
+    /// but its parent isn't the Places root.
+    MisparentedRoot(Guid),
+
+    /// Multiple folders reference the item in their `children`.
+    MultipleParents(Guid),
+
+    /// The item's `parentid` doesn't match that folder's `children`.
+    ParentChildDisagreement(Guid),
+
+    /// The item's `parentid` doesn't exist.
+    MissingParentGuid(Guid),
+
+    /// The item's `parentid` exists, but isn't a folder.
+    NonFolderParentGuid(Guid),
+
+    /// The item is mentioned in a folder's `children`, but doesn't exist or is
+    /// deleted.
+    MissingChild(Guid),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ProblemSummary<'a>(&'a Guid, &'a Problem);
+
+impl<'a> fmt::Display for ProblemSummary<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.1 {
+            Problem::Orphan => write!(f, "{} is an orphan", self.0),
+            Problem::MisparentedRoot(parent_guid) => {
+                write!(f, "{} contains root {}", parent_guid, self.0)
+            }
+            Problem::MultipleParents(parent_guid) => {
+                write!(f, "{} mentions {} in its children", parent_guid, self.0)
+            }
+            Problem::ParentChildDisagreement(parent_guid) => {
+                write!(f, "{} is the parent GUID of {}", parent_guid, self.0)
+            }
+            Problem::MissingParentGuid(parent_guid) => write!(
+                f,
+                "{} references nonexistent parent GUID {}",
+                self.0, parent_guid
+            ),
+            Problem::NonFolderParentGuid(parent_guid) => write!(
+                f,
+                "{} references non-folder parent GUID {}",
+                self.0, parent_guid
+            ),
+            Problem::MissingChild(child_guid) => {
+                write!(f, "{} mentions missing child {}", self.0, child_guid)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Problems(HashMap<Guid, Vec<Problem>>);
+
+impl Problems {
+    fn note(&mut self, guid: &Guid, problem: Problem) {
+        self.0.entry(guid.clone()).or_default().push(problem);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary> {
+        self.0.iter().flat_map(|(guid, problems)| {
+            problems
+                .iter()
+                .map(move |problem| ProblemSummary(guid, problem))
+        })
+    }
+}
+
 /// A node in a bookmark tree that knows its parent and children, and
 /// dereferences to its item.
 #[derive(Clone, Copy, Debug)]
@@ -1036,7 +1179,13 @@ impl<'t> Node<'t> {
                 if children.is_empty() {
                     format!("{}{} {}", prefix, kind, self.1.item)
                 } else {
-                    format!("{}📂 {}\n{}", prefix, self.1.item, children.join("\n"))
+                    format!(
+                        "{}{} {}\n{}",
+                        prefix,
+                        kind,
+                        self.1.item,
+                        children.join("\n")
+                    )
                 }
             }
             _ => {
