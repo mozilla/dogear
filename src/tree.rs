@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt, mem,
@@ -274,109 +275,28 @@ impl Builder {
         ParentBuilder(self, entry_child)
     }
 
-    /// Returns the index of the default parent entry for reparented orphans.
-    /// This is either the default folder (rule 4), or the root, if the
-    /// default folder isn't set, doesn't exist, or isn't a folder (rule 5).
-    fn reparent_orphans_to_default_index(&self) -> Index {
-        self.reparent_orphans_to
-            .as_ref()
-            .and_then(|guid| self.entry_index_by_guid.get(guid))
-            .cloned()
-            .filter(|&parent_index| {
-                let parent_entry = &self.entries[parent_index];
-                parent_entry.item.is_folder()
-            })
-            .unwrap_or(0)
-    }
-
     /// Resolves parents for all entries. Returns a vector of resolved parents
     /// by the entry index, and a lookup table for reparented orphans.
     fn resolve(&self) -> (Vec<ResolvedParent>, HashMap<Index, Vec<Index>>) {
         let mut parents = Vec::with_capacity(self.entries.len());
-        let mut reparented_orphans_by_parent: HashMap<Index, Vec<Index>> = HashMap::new();
+        let mut reparented_child_indices_by_parent: HashMap<Index, Vec<Index>> = HashMap::new();
         for (entry_index, entry) in self.entries.iter().enumerate() {
-            let mut resolved_parent = match &entry.parent {
-                BuilderEntryParent::Root => ResolvedParent::Root,
-                BuilderEntryParent::None => {
-                    // The item doesn't have a `parentid` _or_ `children`.
-                    // Reparent to the default folder (rule 4) or root
-                    // (rule 5).
-                    let parent_index = self.reparent_orphans_to_default_index();
-                    ResolvedParent::ByParentGuid(parent_index)
-                }
-                BuilderEntryParent::Complete(index) => {
-                    // The item has a complete structure. This is the fast path
-                    // for local trees.
-                    ResolvedParent::Unchanged(*index)
-                }
-                BuilderEntryParent::Partial(parents) => match parents.as_slice() {
-                    [BuilderParentBy::UnknownItem(by_item), BuilderParentBy::Children(by_children)]
-                    | [BuilderParentBy::Children(by_children), BuilderParentBy::UnknownItem(by_item)] =>
-                    {
-                        self.entry_index_by_guid
-                            .get(by_item)
-                            .filter(|by_item| by_item == &by_children)
-                            .map(|&by_item| {
-                                // The partial structure is actually complete.
-                                // This is the "fast slow path" for remote
-                                // trees, because we add their structure in
-                                // two passes.
-                                ResolvedParent::Unchanged(by_item)
-                            })
-                            .unwrap_or_else(|| ResolvedParent::ByChildren(*by_children))
-                    }
-
-                    parents => {
-                        // For items with zero, one, or more than two parents,
-                        // pick the youngest (minimum age).
-                        parents
-                            .iter()
-                            .map(|parent_by| PossibleParent::new(self, parent_by))
-                            .min()
-                            .and_then(|p| match p.parent_by {
-                                BuilderParentBy::Children(index) => {
-                                    Some(ResolvedParent::ByChildren(*index))
-                                }
-                                BuilderParentBy::KnownItem(index) => {
-                                    Some(ResolvedParent::ByParentGuid(*index))
-                                }
-                                BuilderParentBy::UnknownItem(guid) => self
-                                    .entry_index_by_guid
-                                    .get(guid)
-                                    .filter(|&&index| self.entries[index].item.is_folder())
-                                    .map(|&index| ResolvedParent::ByParentGuid(index)),
-                            })
-                            .unwrap_or_else(|| {
-                                // Fall back to the default folder (rule 4) or root
-                                // (rule 5) if we didn't find a parent.
-                                let parent_index = self.reparent_orphans_to_default_index();
-                                ResolvedParent::ByParentGuid(parent_index)
-                            })
-                    }
-                },
-            };
-            if entry.item.guid.is_user_content_root() {
-                // ...But user content roots should always be in the Places
-                // root (rule 1).
-                resolved_parent = match resolved_parent {
-                    ResolvedParent::Unchanged(parent_index) if parent_index == 0 => {
-                        ResolvedParent::Unchanged(parent_index)
-                    }
-                    _ => ResolvedParent::ByParentGuid(0),
-                };
-            }
+            let r = ResolveParent::new(&self, entry);
+            let resolved_parent = r.resolve();
             if let ResolvedParent::ByParentGuid(parent_index) = &resolved_parent {
-                // Reparented orphans are special: since we don't know their positions,
-                // we want to move them to the end of their chosen parents, after any
-                // `children` (rules 3-4).
-                let reparented_orphans = reparented_orphans_by_parent
+                // Reparented items are special: since they aren't mentioned in
+                // that parent's `children`, we don't know their positions. Note
+                // them for when we resolve children. We also clone the GUID,
+                // since we use it for sorting, but can't access it by
+                // reference once we call `self.entries.into_iter()` below.
+                let reparented_child_indices = reparented_child_indices_by_parent
                     .entry(*parent_index)
                     .or_default();
-                reparented_orphans.push(entry_index);
+                reparented_child_indices.push(entry_index);
             }
             parents.push(resolved_parent);
         }
-        (parents, reparented_orphans_by_parent)
+        (parents, reparented_child_indices_by_parent)
     }
 }
 
@@ -385,88 +305,102 @@ impl IntoTree for Builder {
     /// resolving inconsistencies like orphans, multiple parents, and
     /// parent-child disagreements.
     fn into_tree(self) -> Result<Tree> {
-        // First, resolve parents for all entries. We build two data structures:
-        // a vector of resolved parents, and a lookup table for reparented
-        // orphaned children.
-        let (parents, mut reparented_orphans_by_parent) = self.resolve();
+        // First, resolve parents for all entries, and build a lookup table for
+        // items without a position.
+        let (parents, reparented_child_indices_by_parent) = self.resolve();
+
+        // If any parents form cycles, abort. We haven't seen cyclic trees in
+        // the wild, and breaking cycles would add complexity.
         if let Some(index) = detect_cycles(&parents) {
             return Err(ErrorKind::Cycle(self.entries[index].item.guid.clone()).into());
         }
-        for reparented_orphans in reparented_orphans_by_parent.values_mut() {
-            // Use a deterministic order for reparented orphans.
-            reparented_orphans.sort_unstable_by(|&index, &other_index| {
-                self.entries[index]
-                    .item
-                    .guid
-                    .cmp(&self.entries[other_index].item.guid)
-            });
-        }
 
-        // Transform our builder entries into tree entries, with resolved
-        // parents and children.
-        let entries = self
-            .entries
-            .into_iter()
-            .enumerate()
-            .map(|(entry_index, entry)| {
-                let mut divergence = Divergence::Consistent;
+        // Then, resolve children, and build a slab of entries for the tree.
+        let mut entries = Vec::with_capacity(self.entries.len());
+        for (entry_index, entry) in self.entries.into_iter().enumerate() {
+            // Each entry is consistent, until proven otherwise!
+            let mut divergence = Divergence::Consistent;
 
-                let parent_index = match &parents[entry_index] {
-                    ResolvedParent::Root => None,
-                    ResolvedParent::Unchanged(index) => Some(*index),
-                    ResolvedParent::ByChildren(index) | ResolvedParent::ByParentGuid(index) => {
-                        divergence = Divergence::Diverged;
-                        Some(*index)
-                    }
-                };
+            let parent_index = match &parents[entry_index] {
+                ResolvedParent::Root => {
+                    // The Places root doesn't have a parent, and should always
+                    // be the first entry.
+                    assert_eq!(entry_index, 0);
+                    None
+                }
+                ResolvedParent::ByStructure(index) => {
+                    // The entry has a valid parent by structure, yay!
+                    Some(*index)
+                }
+                ResolvedParent::ByChildren(index) | ResolvedParent::ByParentGuid(index) => {
+                    // The entry has multiple parents, and we resolved one,
+                    // so it's diverged.
+                    divergence = Divergence::Diverged;
+                    Some(*index)
+                }
+            };
 
-                let mut child_indices = entry
-                    .children
-                    .iter()
-                    .filter_map(|child_index| {
-                        // Filter out missing children and children that moved to a
-                        // different parent.
-                        match child_index {
-                            BuilderEntryChild::Exists(child_index) => {
-                                match &parents[*child_index] {
-                                    ResolvedParent::Root | ResolvedParent::Unchanged(_) => {
-                                        Some(*child_index)
-                                    }
-
-                                    ResolvedParent::ByChildren(parent_index)
-                                    | ResolvedParent::ByParentGuid(parent_index) => {
-                                        divergence = Divergence::Diverged;
-                                        if *parent_index == entry_index {
-                                            Some(*child_index)
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                }
-                            }
-                            BuilderEntryChild::Missing(_) => {
-                                divergence = Divergence::Diverged;
-                                None
+            // Check if the entry's children exist and agree that this entry is
+            // their parent.
+            let mut child_indices = Vec::with_capacity(entry.children.len());
+            for child in entry.children {
+                match child {
+                    BuilderEntryChild::Exists(child_index) => match &parents[child_index] {
+                        ResolvedParent::Root => {
+                            // The Places root can't be a child of another entry.
+                            unreachable!("A child can't be a top-level root");
+                        }
+                        ResolvedParent::ByStructure(parent_index) => {
+                            // If the child has a valid parent by structure, it
+                            // must be the entry. If it's not, there's a bug
+                            // in `ResolveParent` or `BuilderEntry`.
+                            assert_eq!(*parent_index, entry_index);
+                            child_indices.push(child_index);
+                        }
+                        ResolvedParent::ByChildren(parent_index) => {
+                            // If the child has multiple parents, we may have
+                            // resolved a different one, so check if we decided
+                            // to keep the child in this entry.
+                            divergence = Divergence::Diverged;
+                            if *parent_index == entry_index {
+                                child_indices.push(child_index);
                             }
                         }
-                    })
-                    .collect::<Vec<_>>();
-                if let Some(mut reparented_orphans) =
-                    reparented_orphans_by_parent.get_mut(&entry_index)
-                {
-                    // Add reparented orphans to the end.
-                    divergence = Divergence::Diverged;
-                    child_indices.append(&mut reparented_orphans);
+                        ResolvedParent::ByParentGuid(parent_index) => {
+                            // We _can_ prefer a parent `by_parent_guid` over a
+                            // parent `by_children` for misparented user content
+                            // roots, but we should never prefer a parent by
+                            // GUID over a parent by children _for the same
+                            // parent_, since the latter loses the child's
+                            // position.
+                            assert_ne!(*parent_index, entry_index);
+                            divergence = Divergence::Diverged;
+                        }
+                    },
+                    BuilderEntryChild::Missing(_) => {
+                        // If the entry's `children` mentions a GUID for which
+                        // we don't have an entry, ignore the child.
+                        divergence = Divergence::Diverged;
+                    }
                 }
+            }
 
-                TreeEntry {
-                    item: entry.item,
-                    parent_index,
-                    child_indices,
-                    divergence,
-                }
-            })
-            .collect::<Vec<_>>();
+            // Reparented items don't appear in our `children`, so we move them
+            // to the end, after existing children (rules 3-4).
+            if let Some(reparented_child_indices) =
+                reparented_child_indices_by_parent.get(&entry_index)
+            {
+                divergence = Divergence::Diverged;
+                child_indices.extend_from_slice(reparented_child_indices);
+            }
+
+            entries.push(TreeEntry {
+                item: entry.item,
+                parent_index,
+                child_indices,
+                divergence,
+            });
+        }
 
         // Now we have a consistent tree.
         Ok(Tree {
@@ -666,7 +600,7 @@ enum BuilderEntryChild {
 }
 
 /// Holds one or more parents for a builder entry.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum BuilderEntryParent {
     /// The entry is an orphan.
     None,
@@ -699,6 +633,166 @@ enum BuilderParentBy {
     /// The entry's parent comes from its `parentid` and has been
     /// resolved.
     KnownItem(Index),
+}
+
+/// Resolves the parent for a builder entry.
+struct ResolveParent<'a> {
+    builder: &'a Builder,
+    entry: &'a BuilderEntry,
+}
+
+impl<'a> ResolveParent<'a> {
+    fn new(builder: &'a Builder, entry: &'a BuilderEntry) -> ResolveParent<'a> {
+        ResolveParent { builder, entry }
+    }
+
+    fn resolve(self) -> ResolvedParent {
+        if self.entry.item.guid.is_user_content_root() {
+            self.user_content_root()
+        } else {
+            self.item()
+        }
+    }
+
+    /// Returns the parent for this builder entry. This unifies parents
+    /// `by_structure`, which are known to be consistent, and parents
+    /// `by_children` and `by_parent_guid`, which are consistent if they match.
+    fn parent(&self) -> Cow<'a, BuilderEntryParent> {
+        let parents = match &self.entry.parent {
+            // Roots and orphans pass through as-is.
+            BuilderEntryParent::Root => return Cow::Owned(BuilderEntryParent::Root),
+            BuilderEntryParent::None => return Cow::Owned(BuilderEntryParent::None),
+            BuilderEntryParent::Complete(index) => {
+                // The entry is known to have a valid parent by structure. This
+                // is the fast path, used for local trees in Desktop.
+                return Cow::Owned(BuilderEntryParent::Complete(*index));
+            }
+            BuilderEntryParent::Partial(parents) => parents,
+        };
+        // The entry has zero, one, or many parents, recorded separately. Check
+        // if it has exactly two: one `by_parent_guid`, and one `by_children`.
+        let (index_by_guid, index_by_children) = match parents.as_slice() {
+            [BuilderParentBy::UnknownItem(guid), BuilderParentBy::Children(index_by_children)]
+            | [BuilderParentBy::Children(index_by_children), BuilderParentBy::UnknownItem(guid)] => {
+                match self.builder.entry_index_by_guid.get(guid) {
+                    Some(&index_by_guid) => (index_by_guid, *index_by_children),
+                    None => return Cow::Borrowed(&self.entry.parent),
+                }
+            }
+            [BuilderParentBy::KnownItem(index_by_guid), BuilderParentBy::Children(index_by_children)]
+            | [BuilderParentBy::Children(index_by_children), BuilderParentBy::KnownItem(index_by_guid)] => {
+                (*index_by_guid, *index_by_children)
+            }
+            // In all other cases (missing `parentid`, missing from `children`,
+            // multiple parents), return all possible parents. We'll pick one
+            // when we resolve the parent.
+            _ => return Cow::Borrowed(&self.entry.parent),
+        };
+        // If the entry has matching parents `by_children` and `by_parent_guid`,
+        // it has a valid parent by structure. This is the "fast slow path",
+        // used for remote trees in Desktop, because their structure is built in
+        // two passes. In all other cases, we have a parent-child disagreement,
+        // so return all possible parents.
+        if index_by_guid == index_by_children {
+            Cow::Owned(BuilderEntryParent::Complete(index_by_children))
+        } else {
+            Cow::Borrowed(&self.entry.parent)
+        }
+    }
+
+    /// Resolves the parent for a user content root: menu, mobile, toolbar, and
+    /// unfiled. These are simpler to resolve than non-roots because they must
+    /// be children of the Places root (rule 1), which is always the first
+    /// entry.
+    fn user_content_root(self) -> ResolvedParent {
+        match self.parent().as_ref() {
+            BuilderEntryParent::None => {
+                // Orphaned content root. This should only happen if the content
+                // root doesn't have a parent `by_parent_guid`.
+                ResolvedParent::ByParentGuid(0)
+            }
+            BuilderEntryParent::Root => {
+                unreachable!("A user content root can't be a top-level root")
+            }
+            BuilderEntryParent::Complete(index) => {
+                if *index == 0 {
+                    ResolvedParent::ByStructure(*index)
+                } else {
+                    // Move misparented content roots to the Places root.
+                    ResolvedParent::ByParentGuid(0)
+                }
+            }
+            BuilderEntryParent::Partial(_) => {
+                // Ditto for content roots with multiple parents or parent-child
+                // disagreements.
+                ResolvedParent::ByParentGuid(0)
+            }
+        }
+    }
+
+    /// Resolves the parent for a top-level Places root or other item, using
+    /// rules 2-5.
+    fn item(self) -> ResolvedParent {
+        match self.parent().as_ref() {
+            BuilderEntryParent::Root => ResolvedParent::Root,
+            BuilderEntryParent::None => {
+                // The item doesn't have a `parentid`, and isn't mentioned in
+                // any `children`. Reparent to the default folder (rule 4) or
+                // Places root (rule 5).
+                let parent_index = self.reparent_orphans_to_default_index();
+                ResolvedParent::ByParentGuid(parent_index)
+            }
+            BuilderEntryParent::Complete(index) => {
+                // The item's `parentid` and parent's `children` match, so keep
+                // it in its current parent.
+                ResolvedParent::ByStructure(*index)
+            }
+            BuilderEntryParent::Partial(parents) => {
+                // For items with one or more than two parents, pick the
+                // youngest (minimum age).
+                parents
+                    .iter()
+                    .map(|parent_by| PossibleParent::new(self.builder, parent_by))
+                    .min()
+                    .and_then(|p| match p.parent_by {
+                        BuilderParentBy::Children(index) => {
+                            Some(ResolvedParent::ByChildren(*index))
+                        }
+                        BuilderParentBy::KnownItem(index) => {
+                            Some(ResolvedParent::ByParentGuid(*index))
+                        }
+                        BuilderParentBy::UnknownItem(guid) => self
+                            .builder
+                            .entry_index_by_guid
+                            .get(guid)
+                            .filter(|&&index| self.builder.entries[index].item.is_folder())
+                            .map(|&index| ResolvedParent::ByParentGuid(index)),
+                    })
+                    .unwrap_or_else(|| {
+                        // Fall back to the default folder (rule 4) or root
+                        // (rule 5) if we didn't find a parent.
+                        let parent_index = self.reparent_orphans_to_default_index();
+                        ResolvedParent::ByParentGuid(parent_index)
+                    })
+            }
+        }
+    }
+
+    /// Returns the index of the default parent entry for reparented orphans.
+    /// This is either the default folder (rule 4), or the root, if the
+    /// default folder isn't set, doesn't exist, or isn't a folder (rule 5).
+    fn reparent_orphans_to_default_index(&self) -> Index {
+        self.builder
+            .reparent_orphans_to
+            .as_ref()
+            .and_then(|guid| self.builder.entry_index_by_guid.get(guid))
+            .cloned()
+            .filter(|&parent_index| {
+                let parent_entry = &self.builder.entries[parent_index];
+                parent_entry.item.is_folder()
+            })
+            .unwrap_or(0)
+    }
 }
 
 // A possible parent for an item with conflicting parents. We use this wrapper's
@@ -780,11 +874,22 @@ impl<'a> PartialEq for PossibleParent<'a> {
 
 impl<'a> Eq for PossibleParent<'a> {}
 
+/// Describes a resolved parent for an item.
 #[derive(Debug)]
 enum ResolvedParent {
+    /// The item is a top-level root, and has no parent.
     Root,
-    Unchanged(Index),
+
+    /// The item has a valid, consistent structure.
+    ByStructure(Index),
+
+    /// The item has multiple parents; this is the one we picked.
     ByChildren(Index),
+
+    /// The item has a parent-child disagreement: the folder referenced by the
+    /// item's `parentid` doesn't mention the item in its `children`, the
+    /// `parentid` doesn't exist at all, or the item is a misparented content
+    /// root.
     ByParentGuid(Index),
 }
 
@@ -792,7 +897,7 @@ impl ResolvedParent {
     fn index(&self) -> Option<Index> {
         match self {
             ResolvedParent::Root => None,
-            ResolvedParent::Unchanged(index)
+            ResolvedParent::ByStructure(index)
             | ResolvedParent::ByChildren(index)
             | ResolvedParent::ByParentGuid(index) => Some(*index),
         }
