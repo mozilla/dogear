@@ -886,7 +886,33 @@ impl<'t, D: Driver> Merger<'t, D> {
         match (local_node.needs_merge, remote_node.needs_merge) {
             (true, true) => {
                 // The item changed locally and remotely.
-                let newer_side = if local_node.age < remote_node.age {
+                let item = if local_node.is_user_content_root() {
+                    // For roots, we always prefer the local side for item
+                    // changes, like the title (bug 1432614).
+                    ConflictResolution::Local
+                } else {
+                    // For other items, we check the validity to decide
+                    // which side to take.
+                    match remote_node.validity {
+                        Validity::Valid | Validity::Reupload => {
+                            // If the remote item is valid, or valid but needs
+                            // reupload, compare timestamps to decide which side is
+                            // newer.
+                            if local_node.age < remote_node.age {
+                                ConflictResolution::Local
+                            } else {
+                                ConflictResolution::Remote
+                            }
+                        }
+                        // If the remote item must be replaced, take the local
+                        // side. This _loses remote changes_, but we can't
+                        // apply those changes, anyway.
+                        Validity::Replace => ConflictResolution::Local,
+                    }
+                };
+                // For children, it's easier: we always use the newer side, even
+                // if we're taking local changes for the item.
+                let children = if local_node.age < remote_node.age {
                     // The local change is newer, so merge local children first,
                     // followed by remaining unmerged remote children.
                     ConflictResolution::Local
@@ -895,16 +921,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                     // children first, then remaining local children.
                     ConflictResolution::Remote
                 };
-                if local_node.is_user_content_root() {
-                    // For roots, we always prefer the local side for item
-                    // changes, like the title (bug 1432614), but prefer the
-                    // newer side for children.
-                    (ConflictResolution::Local, newer_side)
-                } else {
-                    // For all other items, we prefer the newer side for the
-                    // item and children.
-                    (newer_side, newer_side)
-                }
+                (item, children)
             }
 
             (true, false) => {
