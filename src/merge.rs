@@ -35,7 +35,7 @@ enum StructureChange {
 }
 
 /// Records structure change counters for telemetry.
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Debug, Eq, Hash, PartialEq)]
 pub struct StructureCounts {
     /// Remote non-folder change wins over local deletion.
     pub remote_revives: usize,
@@ -59,7 +59,7 @@ pub struct StructureCounts {
 type MatchingDupes<'t> = (HashMap<Guid, Node<'t>>, HashMap<Guid, Node<'t>>);
 
 /// Represents an accepted local or remote deletion.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Deletion<'t> {
     pub guid: &'t Guid,
     pub local_level: i64,
