@@ -609,6 +609,7 @@ impl BuilderEntry {
     }
 }
 
+/// Holds an existing child index, or missing child GUID, for a builder entry.
 #[derive(Debug)]
 enum BuilderEntryChild {
     Exists(Index),
@@ -1008,17 +1009,19 @@ fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
     None
 }
 
+/// Indicates if a tree entry's structure diverged.
 #[derive(Debug)]
 enum Divergence {
-    /// The node's structure is already correct, and doesn't need to be
-    /// reuploaded.
+    /// The structure is already correct, and doesn't need to be reuploaded.
     Consistent,
 
-    /// The node exists in multiple parents, or is a reparented orphan.
-    /// The merger should reupload the node.
+    /// The node has structure problems, and should be flagged for reupload
+    /// when merging.
     Diverged,
 }
 
+/// Describes a structure divergence for an item in a bookmark tree. These are
+/// used for logging and validation telemetry.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Problem {
     /// The item doesn't have a `parentid`, and isn't mentioned in any folders.
@@ -1089,15 +1092,18 @@ pub enum DivergedParentGuid {
 pub struct Problems(HashMap<Guid, Vec<Problem>>);
 
 impl Problems {
+    /// Notes a problem for an item.
     pub fn note(&mut self, guid: &Guid, problem: Problem) -> &mut Problems {
         self.0.entry(guid.clone()).or_default().push(problem);
         self
     }
 
+    /// Returns `true` if there are no problems.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Returns an iterator for all problems.
     pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary> {
         self.0.iter().flat_map(|(guid, problems)| {
             problems
