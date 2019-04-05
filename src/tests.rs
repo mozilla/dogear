@@ -20,7 +20,10 @@ use crate::driver::Driver;
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
-use crate::tree::{Builder, Content, IntoTree, Item, Kind, Tree, Validity};
+use crate::tree::{
+    Builder, Content, DivergedParent, DivergedParentGuid, IntoTree, Item, Kind, Problem, Problems,
+    Tree, Validity,
+};
 
 #[derive(Debug)]
 struct Node {
@@ -2684,4 +2687,59 @@ fn reupload_replace() {
     assert_eq!(deletions, expected_deletions);
 
     assert_eq!(merger.counts(), &expected_telem);
+}
+
+#[test]
+fn problems() {
+    let mut problems = Problems::default();
+
+    problems
+        .note(&"bookmarkAAAA".into(), Problem::Orphan)
+        .note(
+            &"menu________".into(),
+            Problem::MisparentedRoot(vec![DivergedParent::ByChildren("unfiled_____".into())]),
+        )
+        .note(&"toolbar_____".into(), Problem::MisparentedRoot(Vec::new()))
+        .note(
+            &"bookmarkBBBB".into(),
+            Problem::DivergedParents(vec![
+                DivergedParent::ByChildren("folderCCCCCC".into()),
+                DivergedParentGuid::Folder("folderDDDDDD".into()).into(),
+            ]),
+        )
+        .note(
+            &"bookmarkEEEE".into(),
+            Problem::DivergedParents(vec![
+                DivergedParent::ByChildren("folderFFFFFF".into()),
+                DivergedParentGuid::NonFolder("bookmarkGGGG".into()).into(),
+            ]),
+        )
+        .note(
+            &"bookmarkHHHH".into(),
+            Problem::DivergedParents(vec![
+                DivergedParent::ByChildren("folderIIIIII".into()),
+                DivergedParent::ByChildren("folderJJJJJJ".into()),
+                DivergedParentGuid::Missing("folderKKKKKK".into()).into(),
+            ]),
+        )
+        .note(&"bookmarkLLLL".into(), Problem::DivergedParents(Vec::new()));
+
+    let mut summary = problems.summarize().collect::<Vec<_>>();
+    summary.sort_by(|a, b| a.guid().cmp(b.guid()));
+    assert_eq!(
+        summary
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>(),
+        &[
+            "bookmarkAAAA is an orphan",
+            "bookmarkBBBB is in children of folderCCCCCC and has parent folderDDDDDD",
+            "bookmarkEEEE is in children of folderFFFFFF and has non-folder parent bookmarkGGGG",
+            "bookmarkHHHH is in children of folderIIIIII, is in children of folderJJJJJJ, and has \
+             nonexistent parent folderKKKKKK",
+            "bookmarkLLLL has diverged parents",
+            "menu________ is a user content root, but is in children of unfiled_____",
+            "toolbar_____ is a user content root",
+        ]
+    );
 }

@@ -110,6 +110,12 @@ impl Tree {
             .get(guid)
             .map(|&index| Node(self, &self.entries[index]))
     }
+
+    /// Returns the structure divergences found when building the tree.
+    #[inline]
+    pub fn problems(&self) -> &Problems {
+        &self.problems
+    }
 }
 
 impl IntoTree for Tree {
@@ -379,12 +385,17 @@ impl IntoTree for Builder {
                             divergence = Divergence::Diverged;
                         }
                     },
-                    BuilderEntryChild::Missing(guid) => {
+                    BuilderEntryChild::Missing(child_guid) => {
                         // If the entry's `children` mentions a GUID for which
                         // we don't have an entry, note it as a problem, and
                         // ignore the child.
                         divergence = Divergence::Diverged;
-                        problems.note(&entry.item.guid, Problem::MissingChild(guid.clone()));
+                        problems.note(
+                            &entry.item.guid,
+                            Problem::MissingChild {
+                                child_guid: child_guid.clone(),
+                            },
+                        );
                     }
                 }
             }
@@ -734,27 +745,31 @@ impl<'a> ResolveParent<'a> {
                     ResolvedParent::ByStructure(*index)
                 } else {
                     // Move misparented content roots to the Places root.
-                    let guid = self.builder.entries[*index].item.guid.clone();
-                    self.problems
-                        .note(&self.entry.item.guid, Problem::MisparentedRoot(guid));
+                    let parent_guid = self.builder.entries[*index].item.guid.clone();
+                    self.problems.note(
+                        &self.entry.item.guid,
+                        Problem::MisparentedRoot(vec![
+                            DivergedParent::ByChildren(parent_guid.clone()),
+                            DivergedParentGuid::Folder(parent_guid).into(),
+                        ]),
+                    );
                     ResolvedParent::ByParentGuid(0)
                 }
             }
             BuilderEntryParent::Partial(parents_by) => {
                 // Ditto for content roots with multiple parents or parent-child
                 // disagreements.
-                for parent_by in parents_by {
-                    let guid = match parent_by {
-                        BuilderParentBy::Children(index) | BuilderParentBy::KnownItem(index) => {
-                            &self.builder.entries[*index].item.guid
-                        }
-                        BuilderParentBy::UnknownItem(guid) => guid,
-                    };
-                    self.problems.note(
-                        &self.entry.item.guid,
-                        Problem::MisparentedRoot(guid.clone()),
-                    );
-                }
+                self.problems.note(
+                    &self.entry.item.guid,
+                    Problem::MisparentedRoot(
+                        parents_by
+                            .iter()
+                            .map(|parent_by| {
+                                PossibleParent::new(self.builder, parent_by).summarize()
+                            })
+                            .collect(),
+                    ),
+                );
                 ResolvedParent::ByParentGuid(0)
             }
         }
@@ -781,12 +796,16 @@ impl<'a> ResolveParent<'a> {
             BuilderEntryParent::Partial(parents) => {
                 // For items with one or more than two parents, pick the
                 // youngest (minimum age).
-                let mut possible_parents = Vec::with_capacity(parents.len());
-                for parent_by in parents {
-                    let p = PossibleParent::new(self.builder, parent_by);
-                    self.problems.note(&self.entry.item.guid, p.problem());
-                    possible_parents.push(p);
-                }
+                let possible_parents = parents
+                    .iter()
+                    .map(|parent_by| PossibleParent::new(self.builder, parent_by))
+                    .collect::<Vec<_>>();
+                self.problems.note(
+                    &self.entry.item.guid,
+                    Problem::DivergedParents(
+                        possible_parents.iter().map(|p| p.summarize()).collect(),
+                    ),
+                );
                 possible_parents
                     .into_iter()
                     .min()
@@ -844,29 +863,24 @@ impl<'a> PossibleParent<'a> {
         PossibleParent { builder, parent_by }
     }
 
-    /// Returns the problem with this conflicting parent: multiple parents,
-    /// parent-child disagreement, missing parent, or non-folder parent.
-    fn problem(&self) -> Problem {
+    /// Returns the problem with this conflicting parent.
+    fn summarize(&self) -> DivergedParent {
         let entry = match self.parent_by {
             BuilderParentBy::Children(index) => {
-                return Problem::MultipleParents(self.builder.entries[*index].item.guid.clone());
+                return DivergedParent::ByChildren(self.builder.entries[*index].item.guid.clone());
             }
-            BuilderParentBy::KnownItem(index) => {
-                return Problem::ParentChildDisagreement(
-                    self.builder.entries[*index].item.guid.clone(),
-                );
-            }
+            BuilderParentBy::KnownItem(index) => &self.builder.entries[*index],
             BuilderParentBy::UnknownItem(guid) => {
                 match self.builder.entry_index_by_guid.get(guid) {
                     Some(index) => &self.builder.entries[*index],
-                    None => return Problem::MissingParentGuid(guid.clone()),
+                    None => return DivergedParentGuid::Missing(guid.clone()).into(),
                 }
             }
         };
         if entry.item.is_folder() {
-            Problem::ParentChildDisagreement(entry.item.guid.clone())
+            DivergedParentGuid::Folder(entry.item.guid.clone()).into()
         } else {
-            Problem::NonFolderParentGuid(entry.item.guid.clone())
+            DivergedParentGuid::NonFolder(entry.item.guid.clone()).into()
         }
     }
 }
@@ -1007,70 +1021,77 @@ enum Divergence {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Problem {
-    /// The item doesn't have a `parentid`, and isn't mentioned in any
-    /// folder's `children`.
+    /// The item doesn't have a `parentid`, and isn't mentioned in any folders.
     Orphan,
 
     /// The item is a user content root (menu, mobile, toolbar, or unfiled),
-    /// but its parent isn't the Places root.
-    MisparentedRoot(Guid),
+    /// but `parent_guid` isn't the Places root.
+    MisparentedRoot(Vec<DivergedParent>),
 
-    /// Multiple folders reference the item in their `children`.
-    MultipleParents(Guid),
-
-    /// The item's `parentid` doesn't match that folder's `children`.
-    ParentChildDisagreement(Guid),
-
-    /// The item's `parentid` doesn't exist.
-    MissingParentGuid(Guid),
-
-    /// The item's `parentid` exists, but isn't a folder.
-    NonFolderParentGuid(Guid),
+    /// The item has diverging parents. If the vector contains more than one
+    /// `DivergedParent::ByChildren`, the item has multiple parents. If the
+    /// vector contains a `DivergedParent::ByParentGuid`, with or without a
+    /// `DivergedParent::ByChildren`, the item has a parent-child disagreement.
+    DivergedParents(Vec<DivergedParent>),
 
     /// The item is mentioned in a folder's `children`, but doesn't exist or is
     /// deleted.
-    MissingChild(Guid),
+    MissingChild { child_guid: Guid },
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct ProblemSummary<'a>(&'a Guid, &'a Problem);
+/// Describes where an invalid parent comes from.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum DivergedParent {
+    /// The item appears in this folder's `children`.
+    ByChildren(Guid),
+    /// The `parentid` references this folder.
+    ByParentGuid(DivergedParentGuid),
+}
 
-impl<'a> fmt::Display for ProblemSummary<'a> {
+impl From<DivergedParentGuid> for DivergedParent {
+    fn from(d: DivergedParentGuid) -> DivergedParent {
+        DivergedParent::ByParentGuid(d)
+    }
+}
+
+impl fmt::Display for DivergedParent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.1 {
-            Problem::Orphan => write!(f, "{} is an orphan", self.0),
-            Problem::MisparentedRoot(parent_guid) => {
-                write!(f, "{} contains root {}", parent_guid, self.0)
+        match self {
+            DivergedParent::ByChildren(parent_guid) => {
+                write!(f, "is in children of {}", parent_guid)
             }
-            Problem::MultipleParents(parent_guid) => {
-                write!(f, "{} mentions {} in its children", parent_guid, self.0)
-            }
-            Problem::ParentChildDisagreement(parent_guid) => {
-                write!(f, "{} is the parent GUID of {}", parent_guid, self.0)
-            }
-            Problem::MissingParentGuid(parent_guid) => write!(
-                f,
-                "{} references nonexistent parent GUID {}",
-                self.0, parent_guid
-            ),
-            Problem::NonFolderParentGuid(parent_guid) => write!(
-                f,
-                "{} references non-folder parent GUID {}",
-                self.0, parent_guid
-            ),
-            Problem::MissingChild(child_guid) => {
-                write!(f, "{} mentions missing child {}", self.0, child_guid)
-            }
+            DivergedParent::ByParentGuid(p) => match p {
+                DivergedParentGuid::Folder(parent_guid) => write!(f, "has parent {}", parent_guid),
+                DivergedParentGuid::NonFolder(parent_guid) => {
+                    write!(f, "has non-folder parent {}", parent_guid)
+                }
+                DivergedParentGuid::Missing(parent_guid) => {
+                    write!(f, "has nonexistent parent {}", parent_guid)
+                }
+            },
         }
     }
 }
 
+/// Describes an invalid `parentid`.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum DivergedParentGuid {
+    /// Exists and is a folder.
+    Folder(Guid),
+    /// Exists, but isn't a folder.
+    NonFolder(Guid),
+    /// Doesn't exist at all.
+    Missing(Guid),
+}
+
+/// Records problems for all items in a tree.
 #[derive(Debug, Default)]
 pub struct Problems(HashMap<Guid, Vec<Problem>>);
 
 impl Problems {
-    fn note(&mut self, guid: &Guid, problem: Problem) {
+    pub fn note(&mut self, guid: &Guid, problem: Problem) -> &mut Problems {
         self.0.entry(guid.clone()).or_default().push(problem);
+        self
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1083,6 +1104,64 @@ impl Problems {
                 .iter()
                 .map(move |problem| ProblemSummary(guid, problem))
         })
+    }
+}
+
+/// A printable summary of a problem for an item.
+#[derive(Clone, Copy, Debug)]
+pub struct ProblemSummary<'a>(&'a Guid, &'a Problem);
+
+impl<'a> ProblemSummary<'a> {
+    #[inline]
+    pub fn guid(&self) -> &Guid {
+        &self.0
+    }
+
+    #[inline]
+    pub fn problem(&self) -> &Problem {
+        &self.1
+    }
+}
+
+impl<'a> fmt::Display for ProblemSummary<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let parents = match self.problem() {
+            Problem::Orphan => return write!(f, "{} is an orphan", self.guid()),
+            Problem::MisparentedRoot(parents) => {
+                write!(f, "{} is a user content root", self.guid())?;
+                if parents.is_empty() {
+                    return Ok(());
+                }
+                f.write_str(", but ")?;
+                parents
+            }
+            Problem::DivergedParents(parents) => {
+                if parents.is_empty() {
+                    return write!(f, "{} has diverged parents", self.guid());
+                }
+                write!(f, "{} ", self.guid())?;
+                parents
+            }
+            Problem::MissingChild { child_guid } => {
+                return write!(f, "{} has nonexistent child {}", self.guid(), child_guid);
+            }
+        };
+        match parents.as_slice() {
+            [a] => write!(f, "{}", a)?,
+            [a, b] => write!(f, "{} and {}", a, b)?,
+            _ => {
+                for (i, parent) in parents.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(", ")?;
+                    }
+                    if i == parents.len() - 1 {
+                        f.write_str("and ")?;
+                    }
+                    write!(f, "{}", parent)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
