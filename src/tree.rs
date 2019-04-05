@@ -375,13 +375,11 @@ impl IntoTree for Builder {
                             }
                         }
                         ResolvedParent::ByParentGuid(parent_index) => {
-                            // We _can_ prefer a parent `by_parent_guid` over a
-                            // parent `by_children` for misparented user content
-                            // roots, but we should never prefer a parent by
-                            // GUID over a parent by children _for the same
-                            // parent_, since the latter loses the child's
-                            // position.
-                            assert_ne!(*parent_index, entry_index);
+                            // We should only ever prefer parents
+                            // `by_parent_guid` over parents `by_children` for
+                            // misparented user content roots. Otherwise,
+                            // there's a bug in `ResolveParent`.
+                            assert_eq!(*parent_index, 0);
                             divergence = Divergence::Diverged;
                         }
                     },
