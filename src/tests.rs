@@ -76,7 +76,7 @@ macro_rules! nodes {
     ($guid:expr, $kind:ident) => { nodes!(Guid::from($guid), $kind[]) };
     ($guid:expr, $kind:ident [ $( $name:ident = $value:expr ),* ]) => {{
         #[allow(unused_mut)]
-        let mut item = Item::new(Guid::from($guid), Kind::$kind);
+        let mut item = Item::new(Guid::from($guid).into(), Kind::$kind);
         $({ item.$name = $value; })*
         Node::new(item)
     }};

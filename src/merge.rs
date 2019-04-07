@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
     mem,
 };
@@ -102,10 +103,10 @@ pub struct Merger<'t, D = DefaultDriver> {
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
     new_remote_contents: Option<&'t HashMap<Guid, Content>>,
-    matching_dupes_by_local_parent_guid: HashMap<Guid, MatchingDupes<'t>>,
-    merged_guids: HashSet<Guid>,
-    delete_locally: HashSet<Guid>,
-    delete_remotely: HashSet<Guid>,
+    matching_dupes_by_local_parent_guid: HashMap<Cow<'t, Guid>, MatchingDupes<'t>>,
+    merged_guids: HashSet<Cow<'t, Guid>>,
+    delete_locally: HashSet<Cow<'t, Guid>>,
+    delete_remotely: HashSet<Cow<'t, Guid>>,
     structure_counts: StructureCounts,
 }
 
@@ -181,13 +182,13 @@ impl<'t, D: Driver> Merger<'t, D> {
         // aren't on the server.
         for guid in self.local_tree.deletions() {
             if !self.mentions(guid) {
-                self.delete_remotely.insert(guid.clone());
+                self.delete_remotely.insert(guid.into());
                 self.structure_counts.merged_deletions += 1;
             }
         }
         for guid in self.remote_tree.deletions() {
             if !self.mentions(guid) {
-                self.delete_locally.insert(guid.clone());
+                self.delete_locally.insert(guid.into());
                 self.structure_counts.merged_deletions += 1;
             }
         }
@@ -263,19 +264,20 @@ impl<'t, D: Driver> Merger<'t, D> {
     fn merge_local_only_node(&mut self, local_node: Node<'t>) -> Result<MergedNode<'t>> {
         trace!(self.driver, "Item {} only exists locally", local_node);
 
-        self.merged_guids.insert(local_node.guid.clone());
+        self.merged_guids
+            .insert(Cow::from(&local_node.as_item().guid));
 
         let merged_guid = if local_node.guid.is_valid_guid() {
-            local_node.guid.clone()
+            Cow::from(&local_node.as_item().guid)
         } else {
             warn!(
                 self.driver,
                 "Generating new GUID for local node {}", local_node
             );
-            let new_guid = self.driver.generate_new_guid(&local_node.guid)?;
-            if new_guid != local_node.guid {
+            let new_guid = Cow::from(self.driver.generate_new_guid(&local_node.guid)?);
+            if *new_guid != local_node.guid {
                 if self.merged_guids.contains(&new_guid) {
-                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                    return Err(ErrorKind::DuplicateItem(new_guid.into_owned()).into());
                 }
                 self.merged_guids.insert(new_guid.clone());
             }
@@ -304,23 +306,25 @@ impl<'t, D: Driver> Merger<'t, D> {
     fn merge_remote_only_node(&mut self, remote_node: Node<'t>) -> Result<MergedNode<'t>> {
         trace!(self.driver, "Item {} only exists remotely", remote_node);
 
-        self.merged_guids.insert(remote_node.guid.clone());
+        self.merged_guids
+            .insert(Cow::from(&remote_node.as_item().guid));
 
         let merged_guid = if remote_node.guid.is_valid_guid() {
-            remote_node.guid.clone()
+            Cow::from(&remote_node.as_item().guid)
         } else {
             warn!(
                 self.driver,
                 "Generating new GUID for remote node {}", remote_node
             );
-            let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
-            if new_guid != remote_node.guid {
+            let new_guid = Cow::from(self.driver.generate_new_guid(&remote_node.guid)?);
+            if *new_guid != remote_node.guid {
                 if self.merged_guids.contains(&new_guid) {
-                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                    return Err(ErrorKind::DuplicateItem(new_guid.into_owned()).into());
                 }
                 self.merged_guids.insert(new_guid.clone());
                 // Upload tombstones for changed remote GUIDs.
-                self.delete_remotely.insert(remote_node.guid.clone());
+                self.delete_remotely
+                    .insert(Cow::from(&remote_node.as_item().guid));
                 self.structure_counts.merged_deletions += 1;
             }
             new_guid
@@ -373,24 +377,27 @@ impl<'t, D: Driver> Merger<'t, D> {
             return Err(ErrorKind::MismatchedItemKind(local_node.kind, remote_node.kind).into());
         }
 
-        self.merged_guids.insert(local_node.guid.clone());
-        self.merged_guids.insert(remote_node.guid.clone());
+        self.merged_guids
+            .insert(Cow::from(&local_node.as_item().guid));
+        self.merged_guids
+            .insert(Cow::from(&remote_node.as_item().guid));
 
         let merged_guid = if remote_node.guid.is_valid_guid() {
-            remote_node.guid.clone()
+            Cow::from(&remote_node.as_item().guid)
         } else {
             warn!(
                 self.driver,
                 "Generating new valid GUID for node {}", remote_node
             );
-            let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
-            if new_guid != remote_node.guid {
+            let new_guid = Cow::from(self.driver.generate_new_guid(&remote_node.guid)?);
+            if *new_guid != remote_node.guid {
                 if self.merged_guids.contains(&new_guid) {
-                    return Err(ErrorKind::DuplicateItem(new_guid).into());
+                    return Err(ErrorKind::DuplicateItem(new_guid.into_owned()).into());
                 }
                 self.merged_guids.insert(new_guid.clone());
                 // Upload tombstones for changed remote GUIDs.
-                self.delete_remotely.insert(remote_node.guid.clone());
+                self.delete_remotely
+                    .insert(Cow::from(&remote_node.as_item().guid));
                 self.structure_counts.merged_deletions += 1;
             }
             new_guid
@@ -1197,7 +1204,8 @@ impl<'t, D: Driver> Merger<'t, D> {
         merged_node: &mut MergedNode<'t>,
         remote_node: Node<'t>,
     ) -> Result<StructureChange> {
-        self.delete_remotely.insert(remote_node.guid.clone());
+        self.delete_remotely
+            .insert(Cow::from(&remote_node.as_item().guid));
         for remote_child_node in remote_node.children() {
             if self.merged_guids.contains(&remote_child_node.guid) {
                 trace!(
@@ -1254,7 +1262,8 @@ impl<'t, D: Driver> Merger<'t, D> {
         merged_node: &mut MergedNode<'t>,
         local_node: Node<'t>,
     ) -> Result<StructureChange> {
-        self.delete_locally.insert(local_node.guid.clone());
+        self.delete_locally
+            .insert(Cow::from(&local_node.as_item().guid));
         for local_child_node in local_node.children() {
             if self.merged_guids.contains(&local_child_node.guid) {
                 trace!(
@@ -1449,7 +1458,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             );
             let new_remote_node = {
                 let (local_to_remote, _) = matching_dupes_by_local_parent_guid
-                    .entry(local_parent_node.guid.clone())
+                    .entry(Cow::from(&local_parent_node.as_item().guid))
                     .or_insert_with(|| {
                         trace!(
                             self.driver,
@@ -1504,7 +1513,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             );
             let new_local_node = {
                 let (_, remote_to_local) = matching_dupes_by_local_parent_guid
-                    .entry(local_parent_node.guid.clone())
+                    .entry(Cow::from(&local_parent_node.as_item().guid))
                     .or_insert_with(|| {
                         trace!(
                             self.driver,

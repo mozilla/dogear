@@ -1175,6 +1175,12 @@ impl<'a> fmt::Display for ProblemSummary<'a> {
 pub struct Node<'t>(&'t Tree, &'t TreeEntry);
 
 impl<'t> Node<'t> {
+    /// Returns a reference to this node's item.
+    #[inline]
+    pub fn as_item(&self) -> &'t Item {
+        &self.1.item
+    }
+
     /// Returns an iterator for all children of this node.
     pub fn children<'n>(&'n self) -> impl Iterator<Item = Node<'t>> + 'n {
         self.1
@@ -1247,7 +1253,7 @@ impl<'t> Node<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        match self.1.item.kind {
+        match self.as_item().kind {
             Kind::Folder => {
                 let children_prefix = format!("{}| ", prefix);
                 let children = self
@@ -1260,13 +1266,13 @@ impl<'t> Node<'t> {
                     "📂"
                 };
                 if children.is_empty() {
-                    format!("{}{} {}", prefix, kind, self.1.item)
+                    format!("{}{} {}", prefix, kind, self.as_item())
                 } else {
                     format!(
                         "{}{} {}\n{}",
                         prefix,
                         kind,
-                        self.1.item,
+                        self.as_item(),
                         children.join("\n")
                     )
                 }
@@ -1277,7 +1283,7 @@ impl<'t> Node<'t> {
                 } else {
                     "🔖"
                 };
-                format!("{}{} {}", prefix, kind, self.1.item)
+                format!("{}{} {}", prefix, kind, self.as_item())
             }
         }
     }
@@ -1291,21 +1297,22 @@ impl<'t> Node<'t> {
     /// Indicates if this node is a user content root.
     #[inline]
     pub fn is_user_content_root(&self) -> bool {
-        self.1.item.guid.is_user_content_root()
+        self.as_item().guid.is_user_content_root()
     }
 }
 
 impl<'t> Deref for Node<'t> {
     type Target = Item;
 
+    #[inline]
     fn deref(&self) -> &Item {
-        &self.1.item
+        self.as_item()
     }
 }
 
 impl<'t> fmt::Display for Node<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.1.item.fmt(f)
+        self.as_item().fmt(f)
     }
 }
 
@@ -1321,7 +1328,7 @@ impl<'t> PartialEq for Node<'t> {
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
         }
-        if self.1.item != other.1.item {
+        if self.as_item() != other.as_item() {
             return false;
         }
         self.children().eq(other.children())
@@ -1441,6 +1448,7 @@ impl<'t> MergedRoot<'t> {
     }
 
     /// Returns the root node.
+    #[inline]
     pub fn node(&self) -> &MergedNode {
         &self.node
     }
@@ -1481,7 +1489,7 @@ impl<'t> IntoTree for MergedRoot<'t> {
     fn into_tree(self) -> Result<Tree> {
         fn to_item(merged_node: &MergedNode) -> Item {
             let node = merged_node.merge_state.node();
-            let mut item = Item::new(merged_node.guid.clone(), node.kind);
+            let mut item = Item::new(merged_node.guid.clone().into_owned(), node.kind);
             item.age = node.age;
             item.needs_merge = merged_node.merge_state.upload_reason() != UploadReason::None;
             item
@@ -1505,16 +1513,19 @@ impl<'t> IntoTree for MergedRoot<'t> {
 /// child nodes.
 #[derive(Debug)]
 pub struct MergedNode<'t> {
-    pub guid: Guid,
+    pub guid: Cow<'t, Guid>,
     pub merge_state: MergeState<'t>,
     pub merged_children: Vec<MergedNode<'t>>,
 }
 
 impl<'t> MergedNode<'t> {
     /// Creates a merged node from the given merge state.
-    pub(crate) fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
+    pub(crate) fn new<G: Into<Cow<'t, Guid>>>(
+        guid: G,
+        merge_state: MergeState<'t>,
+    ) -> MergedNode<'t> {
         MergedNode {
-            guid,
+            guid: guid.into(),
             merge_state,
             merged_children: Vec::new(),
         }
@@ -1526,7 +1537,7 @@ impl<'t> MergedNode<'t> {
     pub(crate) fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
-            .map(|remote_node| remote_node.guid != self.guid)
+            .map(|remote_node| remote_node.guid != *self.guid)
             .unwrap_or(false)
     }
 

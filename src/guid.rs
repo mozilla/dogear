@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
@@ -221,13 +222,6 @@ impl PartialEq<str> for Guid {
     }
 }
 
-impl<'a> PartialEq<&'a str> for Guid {
-    #[inline]
-    fn eq(&self, other: &&'a str) -> bool {
-        self == *other
-    }
-}
-
 impl PartialEq for Guid {
     #[inline]
     fn eq(&self, other: &Guid) -> bool {
@@ -235,10 +229,29 @@ impl PartialEq for Guid {
     }
 }
 
+impl<'a> PartialEq<&'a Guid> for Guid {
+    #[inline]
+    fn eq(&self, other: &&Guid) -> bool {
+        self == *other
+    }
+}
+
 impl<'a> PartialEq<Guid> for &'a Guid {
     #[inline]
     fn eq(&self, other: &Guid) -> bool {
         *self == other
+    }
+}
+
+impl<'a> From<Guid> for Cow<'a, Guid> {
+    fn from(guid: Guid) -> Cow<'a, Guid> {
+        Cow::Owned(guid)
+    }
+}
+
+impl<'a> From<&'a Guid> for Cow<'a, Guid> {
+    fn from(guid: &'a Guid) -> Cow<'a, Guid> {
+        Cow::Borrowed(guid)
     }
 }
 
