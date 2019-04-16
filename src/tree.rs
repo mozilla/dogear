@@ -69,7 +69,7 @@ impl Tree {
 
     /// Returns the root node.
     #[inline]
-    pub fn root(&self) -> Node {
+    pub fn root(&self) -> Node<'_> {
         Node(self, &self.entries[0])
     }
 
@@ -104,7 +104,7 @@ impl Tree {
 
     /// Returns the node for a given `guid`, or `None` if a node with the `guid`
     /// doesn't exist in the tree, or was deleted.
-    pub fn node_for_guid(&self, guid: &Guid) -> Option<Node> {
+    pub fn node_for_guid(&self, guid: &Guid) -> Option<Node<'_>> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entry_index_by_guid
             .get(guid)
@@ -126,7 +126,7 @@ impl IntoTree for Tree {
 }
 
 impl fmt::Display for Tree {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let root = self.root();
         f.write_str(&root.to_ascii_string())?;
         if !self.deleted_guids.is_empty() {
@@ -261,7 +261,7 @@ impl Builder {
 
     /// Inserts an `item` into the tree. Returns an error if the item already
     /// exists.
-    pub fn item(&mut self, item: Item) -> Result<ParentBuilder> {
+    pub fn item(&mut self, item: Item) -> Result<ParentBuilder<'_>> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         if self.entry_index_by_guid.contains_key(&item.guid) {
             return Err(ErrorKind::DuplicateItem(item.guid.clone()).into());
@@ -279,7 +279,7 @@ impl Builder {
 
     /// Sets parents for a `child_guid`. Depending on where the parent comes
     /// from, `child_guid` may not need to exist in the tree.
-    pub fn parent_for(&mut self, child_guid: &Guid) -> ParentBuilder {
+    pub fn parent_for(&mut self, child_guid: &Guid) -> ParentBuilder<'_> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         let entry_child = match self.entry_index_by_guid.get(child_guid) {
             Some(&child_index) => BuilderEntryChild::Exists(child_index),
@@ -889,7 +889,7 @@ impl<'a> Ord for PossibleParent<'a> {
     /// (`Ordering::Less`). Prefers parents from `children` over `parentid`
     /// (rule 2), and `parentid`s that reference folders over non-folders
     /// (rule 4).
-    fn cmp(&self, other: &PossibleParent) -> Ordering {
+    fn cmp(&self, other: &PossibleParent<'_>) -> Ordering {
         let (index, other_index) = match (&self.parent_by, &other.parent_by) {
             (BuilderParentBy::Children(index), BuilderParentBy::Children(other_index)) => {
                 // Both `self` and `other` mention the item in their `children`.
@@ -936,13 +936,13 @@ impl<'a> Ord for PossibleParent<'a> {
 }
 
 impl<'a> PartialOrd for PossibleParent<'a> {
-    fn partial_cmp(&self, other: &PossibleParent) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &PossibleParent<'_>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl<'a> PartialEq for PossibleParent<'a> {
-    fn eq(&self, other: &PossibleParent) -> bool {
+    fn eq(&self, other: &PossibleParent<'_>) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
@@ -1056,7 +1056,7 @@ impl From<DivergedParentGuid> for DivergedParent {
 }
 
 impl fmt::Display for DivergedParent {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DivergedParent::ByChildren(parent_guid) => {
                 write!(f, "is in children of {}", parent_guid)
@@ -1102,7 +1102,7 @@ impl Problems {
     }
 
     /// Returns an iterator for all problems.
-    pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary> {
+    pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary<'_>> {
         self.0.iter().flat_map(|(guid, problems)| {
             problems
                 .iter()
@@ -1128,7 +1128,7 @@ impl<'a> ProblemSummary<'a> {
 }
 
 impl<'a> fmt::Display for ProblemSummary<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let parents = match self.problem() {
             Problem::Orphan => return write!(f, "{} is an orphan", self.guid()),
             Problem::MisparentedRoot(parents) => {
@@ -1185,7 +1185,7 @@ impl<'t> Node<'t> {
 
     /// Returns the resolved parent of this node, or `None` if this is the
     /// root node.
-    pub fn parent(&self) -> Option<Node> {
+    pub fn parent(&self) -> Option<Node<'_>> {
         self.1
             .parent_index
             .as_ref()
@@ -1304,14 +1304,14 @@ impl<'t> Deref for Node<'t> {
 }
 
 impl<'t> fmt::Display for Node<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.1.item.fmt(f)
     }
 }
 
 #[cfg(test)]
 impl<'t> PartialEq for Node<'t> {
-    fn eq(&self, other: &Node) -> bool {
+    fn eq(&self, other: &Node<'_>) -> bool {
         match (self.parent(), other.parent()) {
             (Some(parent), Some(other_parent)) => {
                 if parent.1.item != other_parent.1.item {
@@ -1373,7 +1373,7 @@ impl Item {
 }
 
 impl fmt::Display for Item {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self.validity {
             Validity::Valid => format!("{}", self.kind),
             Validity::Reupload | Validity::Replace => format!("{} ({})", self.kind, self.validity),
@@ -1398,7 +1398,7 @@ pub enum Kind {
 }
 
 impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
@@ -1420,7 +1420,7 @@ pub enum Validity {
 }
 
 impl fmt::Display for Validity {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
@@ -1436,18 +1436,18 @@ impl<'t> MergedRoot<'t> {
     /// Returns a merged root for the given node. `size_hint` indicates the
     /// size of the tree, excluding the root, and is used to avoid extra
     /// allocations for the descendants.
-    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot {
+    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot<'_> {
         MergedRoot { node, size_hint }
     }
 
     /// Returns the root node.
-    pub fn node(&self) -> &MergedNode {
+    pub fn node(&self) -> &MergedNode<'_> {
         &self.node
     }
 
     /// Returns a flattened `Vec` of the root node's descendants, excluding the
     /// root node itself.
-    pub fn descendants(&self) -> Vec<MergedDescendant> {
+    pub fn descendants(&self) -> Vec<MergedDescendant<'_>> {
         fn accumulate<'t>(
             results: &mut Vec<MergedDescendant<'t>>,
             merged_node: &'t MergedNode<'t>,
@@ -1479,7 +1479,7 @@ impl<'t> MergedRoot<'t> {
 #[cfg(test)]
 impl<'t> IntoTree for MergedRoot<'t> {
     fn into_tree(self) -> Result<Tree> {
-        fn to_item(merged_node: &MergedNode) -> Item {
+        fn to_item(merged_node: &MergedNode<'_>) -> Item {
             let node = merged_node.merge_state.node();
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
@@ -1551,7 +1551,7 @@ impl<'t> MergedNode<'t> {
 }
 
 impl<'t> fmt::Display for MergedNode<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.guid, self.merge_state)
     }
 }
@@ -1765,7 +1765,7 @@ impl<'t> MergeState<'t> {
 }
 
 impl<'t> fmt::Display for MergeState<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             MergeState::LocalOnly(_) | MergeState::Local { .. } => "(Local, Local)",
 

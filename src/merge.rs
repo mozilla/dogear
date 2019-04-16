@@ -206,11 +206,11 @@ impl<'t, D: Driver> Merger<'t, D> {
 
     /// Returns an iterator for all accepted local and remote deletions.
     #[inline]
-    pub fn deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub fn deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.local_deletions().chain(self.remote_deletions())
     }
 
-    pub(crate) fn local_deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub(crate) fn local_deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.delete_locally.iter().filter_map(move |guid| {
             if self.delete_remotely.contains(guid) {
                 None
@@ -232,7 +232,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         })
     }
 
-    pub(crate) fn remote_deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub(crate) fn remote_deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.delete_remotely.iter().map(move |guid| {
             let local_level = self
                 .local_tree
@@ -1544,7 +1544,7 @@ impl<'t, D: Driver> Merger<'t, D> {
 
 /// Indicates if the tree in the remote node is syncable. This filters out
 /// livemarks (bug 1477671) and orphaned Places queries (bug 1433182).
-fn remote_node_is_syncable(remote_node: &Node) -> bool {
+fn remote_node_is_syncable(remote_node: &Node<'_>) -> bool {
     if !remote_node.is_syncable() {
         return false;
     }

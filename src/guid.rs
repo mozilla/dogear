@@ -252,13 +252,13 @@ impl Hash for Guid {
 
 // The default Debug impl is pretty unhelpful here.
 impl fmt::Debug for Guid {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Guid({:?})", self.as_str())
     }
 }
 
 impl fmt::Display for Guid {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
