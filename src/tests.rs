@@ -2633,7 +2633,7 @@ fn cycle() {
         .kind()
     {
         ErrorKind::Cycle(guid) => assert_eq!(guid, &Guid::from("folderAAAAAA")),
-        err => assert!(false, "Wrong error kind for cycle: {:?}", err),
+        err => panic!("Wrong error kind for cycle: {:?}", err),
     }
 }
 

@@ -802,7 +802,10 @@ impl<'a> ResolveParent<'a> {
                 self.problems.note(
                     &self.entry.item.guid,
                     Problem::DivergedParents(
-                        possible_parents.iter().map(|p| p.summarize()).collect(),
+                        possible_parents
+                            .iter()
+                            .map(PossibleParent::summarize)
+                            .collect(),
                     ),
                 );
                 possible_parents
