@@ -1221,13 +1221,16 @@ impl<'t> Node<'t> {
         if self.is_user_content_root() {
             return true;
         }
-        if self.kind == Kind::Query && self.diverged() {
-            // TODO(lina): Flag queries reparented specifically to `unfiled`.
-            return false;
+        match self.kind {
+            // Exclude livemarks (bug 1477671).
+            Kind::Livemark => false,
+            // Exclude orphaned Places queries (bug 1433182).
+            Kind::Query if self.diverged() => false,
+            _ => self
+                .parent()
+                .map(|parent| parent.is_syncable())
+                .unwrap_or(false),
         }
-        self.parent()
-            .map(|parent| parent.is_syncable())
-            .unwrap_or(false)
     }
 
     /// Indicates if this node's structure diverged because it
