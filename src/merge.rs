@@ -218,8 +218,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 let local_level = self
                     .local_tree
                     .node_for_guid(guid)
-                    .map(|node| node.level())
-                    .unwrap_or(-1);
+                    .map_or(-1, |node| node.level());
                 // Items that should be deleted locally already have tombstones
                 // on the server, so we don't need to upload tombstones for
                 // these deletions.
@@ -237,8 +236,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             let local_level = self
                 .local_tree
                 .node_for_guid(guid)
-                .map(|node| node.level())
-                .unwrap_or(-1);
+                .map_or(-1, |node| node.level());
             Deletion {
                 guid,
                 local_level,

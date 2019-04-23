@@ -147,12 +147,9 @@ impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     #[inline]
     fn is_valid_guid(&self) -> bool {
         self.len() == 12
-            && self.iter().all(|&byte| {
-                VALID_GUID_BYTES
-                    .get(byte.into())
-                    .map(|&b| b == 1)
-                    .unwrap_or(false)
-            })
+            && self
+                .iter()
+                .all(|&byte| VALID_GUID_BYTES.get(byte.into()).map_or(false, |&b| b == 1))
     }
 }
 

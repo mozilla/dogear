@@ -1197,7 +1197,7 @@ impl<'t> Node<'t> {
         if self.is_root() {
             return 0;
         }
-        self.parent().map(|parent| parent.level() + 1).unwrap_or(-1)
+        self.parent().map_or(-1, |parent| parent.level() + 1)
     }
 
     /// Indicates if this node is for a syncable item.
@@ -1226,10 +1226,7 @@ impl<'t> Node<'t> {
             Kind::Livemark => false,
             // Exclude orphaned Places queries (bug 1433182).
             Kind::Query if self.diverged() => false,
-            _ => self
-                .parent()
-                .map(|parent| parent.is_syncable())
-                .unwrap_or(false),
+            _ => self.parent().map_or(false, |parent| parent.is_syncable()),
         }
     }
 
@@ -1529,8 +1526,7 @@ impl<'t> MergedNode<'t> {
     pub(crate) fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
-            .map(|remote_node| remote_node.guid != self.guid)
-            .unwrap_or(false)
+            .map_or(false, |remote_node| remote_node.guid != self.guid)
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
