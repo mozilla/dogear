@@ -214,7 +214,7 @@ impl PartialOrd for Guid {
 impl PartialEq<str> for Guid {
     #[inline]
     fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
+        self.as_bytes() == other.as_bytes()
     }
 }
 
