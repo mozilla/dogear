@@ -18,13 +18,14 @@ use crate::driver::{AbortSignal, DefaultAbortSignal, DefaultDriver, Driver};
 use crate::error::{Error, ErrorKind};
 use crate::guid::Guid;
 use crate::merge::{Deletion, Merger, StructureCounts};
-use crate::tree::{Content, MergedRoot, Tree};
+use crate::tree::{Content, MergedRoot, ProblemCounts, Tree};
 
 /// Records timings and counters for telemetry.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Stats {
     pub timings: MergeTimings,
     pub counts: StructureCounts,
+    pub problems: ProblemCounts,
 }
 
 /// Records timings for merging operations.
@@ -162,6 +163,10 @@ pub trait Store<E: From<Error>> {
         Ok(Stats {
             timings: merge_timings,
             counts: *merger.counts(),
+            problems: local_tree
+                .problems()
+                .counts()
+                .add(remote_tree.problems().counts()),
         })
     }
 }
