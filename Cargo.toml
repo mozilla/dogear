@@ -7,6 +7,7 @@ authors = ["Lina Cambridge <lina@mozilla.com>"]
 license = "Apache-2.0"
 exclude = ["/.travis/**", ".travis.yml"]
 edition = "2018"
+readme = "README.md"
 
 [dependencies]
 log = "0.4"

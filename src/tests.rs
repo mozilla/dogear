@@ -26,8 +26,8 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
 use crate::tree::{
-    Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, Problem, Problems,
-    Tree, Validity,
+    Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, Problem, Problems, Tree,
+    Validity,
 };
 
 #[derive(Debug)]
