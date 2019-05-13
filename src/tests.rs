@@ -21,7 +21,7 @@ use std::{
 
 use env_logger;
 
-use crate::driver::Driver;
+use crate::driver::{DefaultAbortSignal, Driver};
 use crate::error::{Error, ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
@@ -2293,6 +2293,7 @@ fn invalid_guids() {
     let driver = GenerateNewGuid::default();
     let mut merger = Merger::with_driver(
         &driver,
+        &DefaultAbortSignal,
         &local_tree,
         &new_local_contents,
         &remote_tree,
