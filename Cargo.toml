@@ -5,7 +5,7 @@ version = "0.2.5"
 repository = "https://github.com/mozilla/dogear"
 authors = ["Lina Cambridge <lina@mozilla.com>"]
 license = "Apache-2.0"
-exclude = ["/.travis/**", ".travis.yml", "/docs/**"]
+exclude = ["/.travis/**", ".travis.yml", "/docs/**", "book.toml"]
 edition = "2018"
 readme = "README.md"
 
