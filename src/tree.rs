@@ -62,6 +62,12 @@ impl Tree {
         }
     }
 
+    /// Returns the number of nodes in the tree.
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.entries.len()
+    }
+
     /// Returns the root node.
     #[inline]
     pub fn root(&self) -> Node<'_> {
