@@ -4,19 +4,11 @@ rust:
   - beta
   - nightly
 dist: trusty
-sudo: required
 
 addons:
   apt:
     packages:
-      - libcurl4-openssl-dev
-      - libelf-dev
-      - libdw-dev
-      - cmake
-      - gcc
-      - binutils-dev
-      - libiberty-dev
-      - moreutils
+      - libssl-dev
 
 cache:
   cargo: true
@@ -25,7 +17,6 @@ cache:
 
 env:
   global:
-    - KCOV_VERSION=36
     - MDBOOK_VERSION=0.2.1
     - PATH=$HOME/.local/bin:$PATH
 
@@ -36,6 +27,7 @@ install:
   - ./.travis/install.sh
 
 script:
+  - cargo clean
   - cargo build
   - cargo test
   - mdbook build
