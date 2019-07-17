@@ -1109,9 +1109,9 @@ fn nonexistent_on_one_side() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let mut expected_root = Item::new(ROOT_GUID, Kind::Folder);
-    expected_root.needs_merge = true;
-    let expected_tree = Tree::with_root(expected_root).into_tree().unwrap();
+    let expected_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
+        .into_tree()
+        .unwrap();
     let expected_deletions = vec!["bookmarkAAAA", "bookmarkBBBB"];
     let expected_telem = StructureCounts {
         merged_deletions: 2,
@@ -1961,7 +1961,7 @@ fn applying_two_empty_folders_doesnt_smush() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
+    let expected_tree = nodes!(ROOT_GUID, Folder, {
         ("mobile______", Folder, {
             ("emptyempty01", Folder),
             ("emptyempty02", Folder)
@@ -2370,7 +2370,7 @@ fn multiple_parents() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
+    let expected_tree = nodes!(ROOT_GUID, Folder, {
         ("toolbar_____", Folder[age = 5, needs_merge = true], {
             ("bookmarkBBBB", Bookmark)
         }),

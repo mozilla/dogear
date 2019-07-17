@@ -1324,6 +1324,30 @@ impl<'t> Node<'t> {
             .map(move |&child_index| Node(self.0, &self.0.entries[child_index]))
     }
 
+    /// Returns the child at the given index, or `None` if the index is out of
+    /// bounds.
+    pub fn child(&self, index: usize) -> Option<Node<'_>> {
+        self.1
+            .child_indices
+            .get(index)
+            .map(|&child_index| Node(self.0, &self.0.entries[child_index]))
+    }
+
+    /// Returns `true` if this and `other` have the same child GUIDs.
+    pub fn has_matching_children<'u>(&self, other: Node<'u>) -> bool {
+        if self.1.child_indices.len() != other.1.child_indices.len() {
+            return false;
+        }
+        for (index, &child_index) in self.1.child_indices.iter().enumerate() {
+            let guid = &self.0.entries[child_index].item.guid;
+            let other_guid = &other.0.entries[other.1.child_indices[index]].item.guid;
+            if guid != other_guid {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Returns the resolved parent of this node, or `None` if this is the
     /// root node.
     pub fn parent(&self) -> Option<Node<'_>> {
@@ -1610,6 +1634,14 @@ impl<'t> MergedRoot<'t> {
         results
     }
 
+    /// Returns a sequence of completion operations, or "completion ops", to
+    /// apply to the local tree so that it matches the merged tree.
+    pub fn completion_ops(&self) -> CompletionOps<'_> {
+        let mut actions = CompletionOps::default();
+        accumulate(&mut actions, &self.node, 1);
+        actions
+    }
+
     /// Returns an ASCII art representation of the root and its descendants,
     /// similar to `Node::to_ascii_string`.
     pub fn to_ascii_string(&self) -> String {
@@ -1631,7 +1663,7 @@ impl<'t> TryFrom<MergedRoot<'t>> for Tree {
             let node = merged_node.merge_state.node();
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
-            item.needs_merge = merged_node.merge_state.upload_reason() != UploadReason::None;
+            item.needs_merge = merged_node.merge_state.should_upload();
             item
         }
 
@@ -1660,7 +1692,7 @@ pub struct MergedNode<'t> {
 
 impl<'t> MergedNode<'t> {
     /// Creates a merged node from the given merge state.
-    pub(crate) fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
+    pub fn new(guid: Guid, merge_state: MergeState<'t>) -> MergedNode<'t> {
         MergedNode {
             guid,
             merge_state,
@@ -1668,10 +1700,19 @@ impl<'t> MergedNode<'t> {
         }
     }
 
+    /// Indicates if the merged node exists locally and has a new GUID.
+    /// The merger uses this to flag deduped items and items with invalid
+    /// GUIDs with new local structure.
+    pub fn local_guid_changed(&self) -> bool {
+        self.merge_state
+            .local_node()
+            .map_or(false, |local_node| local_node.guid != self.guid)
+    }
+
     /// Indicates if the merged node exists remotely and has a new GUID. The
     /// merger uses this to flag parents and children of remote nodes with
     /// invalid GUIDs for reupload.
-    pub(crate) fn remote_guid_changed(&self) -> bool {
+    pub fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
             .map_or(false, |remote_node| remote_node.guid != self.guid)
@@ -1721,13 +1762,28 @@ pub enum MergeState<'t> {
     /// be uploaded.
     LocalOnly(Node<'t>),
 
+    /// Local-only with a merged structure means the item should be uploaded,
+    /// _and_ has a new structure that should be applied.
+    LocalOnlyWithNewLocalStructure(Node<'t>),
+
     /// A remote-only merge state means the item only exists remotely, and
     /// should be applied.
     RemoteOnly(Node<'t>),
 
+    /// Remote-only with a merged structure means the item should be applied,
+    /// _and_ has a new structure that should be reuploaded.
+    RemoteOnlyWithNewRemoteStructure(Node<'t>),
+
     /// A local merge state means the item exists on both sides, and has newer
     /// local changes that should be uploaded.
     Local {
+        local_node: Node<'t>,
+        remote_node: Node<'t>,
+    },
+
+    /// Local with a merged structure means the item has newer local changes
+    /// that should be uploaded, and a new structure that should be applied.
+    LocalWithNewLocalStructure {
         local_node: Node<'t>,
         remote_node: Node<'t>,
     },
@@ -1739,17 +1795,9 @@ pub enum MergeState<'t> {
         remote_node: Node<'t>,
     },
 
-    /// A remote-only merge state with new structure means the item only exists
-    /// remotely, and has a new merged structure that should be reuploaded. We
-    /// use new structure states to resolve conflicts caused by moving local
-    /// items out of a remotely deleted folder, moving remote items out of a
-    /// locally deleted folder, or merging divergent items.
-    RemoteOnlyWithNewStructure(Node<'t>),
-
-    /// A remote merge state with new structure means the item exists on both
-    /// sides, has newer remote changes, and new structure that should be
-    /// reuploaded.
-    RemoteWithNewStructure {
+    /// Remote with a merged structure means the item has newer remote changes
+    /// that should be applied, and a new structure that should be reuploaded.
+    RemoteWithNewRemoteStructure {
         local_node: Node<'t>,
         remote_node: Node<'t>,
     },
@@ -1760,21 +1808,13 @@ pub enum MergeState<'t> {
         local_node: Node<'t>,
         remote_node: Node<'t>,
     },
-}
 
-/// The reason for uploading or reuploading a merged descendant.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum UploadReason {
-    /// The item doesn't need to be uploaded.
-    None,
-    /// The item was added locally since the last sync.
-    LocallyNew,
-    /// The item has newer local changes.
-    Merged,
-    /// The item didn't change locally, but has new structure. Reuploading
-    /// the same item with new structure on every sync may indicate a sync loop,
-    /// where two or more clients clash trying to fix up the remote tree.
-    NewStructure,
+    /// Unchanged with a merged structure means the item hasn't changed, but
+    /// its structure has, and should be applied.
+    UnchangedWithNewLocalStructure {
+        local_node: Node<'t>,
+        remote_node: Node<'t>,
+    },
 }
 
 impl<'t> MergeState<'t> {
@@ -1783,12 +1823,14 @@ impl<'t> MergeState<'t> {
     pub fn local_node(&self) -> Option<&Node<'t>> {
         match self {
             MergeState::LocalOnly(local_node)
+            | MergeState::LocalOnlyWithNewLocalStructure(local_node)
             | MergeState::Local { local_node, .. }
+            | MergeState::LocalWithNewLocalStructure { local_node, .. }
             | MergeState::Remote { local_node, .. }
-            | MergeState::RemoteWithNewStructure { local_node, .. }
-            | MergeState::Unchanged { local_node, .. } => Some(local_node),
-
-            MergeState::RemoteOnly(_) | MergeState::RemoteOnlyWithNewStructure(_) => None,
+            | MergeState::RemoteWithNewRemoteStructure { local_node, .. }
+            | MergeState::Unchanged { local_node, .. }
+            | MergeState::UnchangedWithNewLocalStructure { local_node, .. } => Some(local_node),
+            MergeState::RemoteOnly(_) | MergeState::RemoteOnlyWithNewRemoteStructure(_) => None,
         }
     }
 
@@ -1796,14 +1838,15 @@ impl<'t> MergeState<'t> {
     /// locally. The inverse of `local_node()`.
     pub fn remote_node(&self) -> Option<&Node<'t>> {
         match self {
-            MergeState::RemoteOnly(remote_node)
-            | MergeState::Local { remote_node, .. }
+            MergeState::Local { remote_node, .. }
+            | MergeState::LocalWithNewLocalStructure { remote_node, .. }
+            | MergeState::RemoteOnly(remote_node)
+            | MergeState::RemoteOnlyWithNewRemoteStructure(remote_node)
             | MergeState::Remote { remote_node, .. }
-            | MergeState::RemoteOnlyWithNewStructure(remote_node)
-            | MergeState::RemoteWithNewStructure { remote_node, .. }
-            | MergeState::Unchanged { remote_node, .. } => Some(remote_node),
-
-            MergeState::LocalOnly(_) => None,
+            | MergeState::RemoteWithNewRemoteStructure { remote_node, .. }
+            | MergeState::Unchanged { remote_node, .. }
+            | MergeState::UnchangedWithNewLocalStructure { remote_node, .. } => Some(remote_node),
+            MergeState::LocalOnly(_) | MergeState::LocalOnlyWithNewLocalStructure(_) => None,
         }
     }
 
@@ -1811,56 +1854,124 @@ impl<'t> MergeState<'t> {
     /// in the local tree. This is not necessarily the inverse of
     /// `should_upload()`, as remote items with new structure should be both
     /// applied and reuploaded, and unchanged items should be neither.
-    pub fn should_apply(&self) -> bool {
+    pub fn should_apply_item(&self) -> bool {
         match self {
             MergeState::RemoteOnly(_)
+            | MergeState::RemoteOnlyWithNewRemoteStructure(_)
             | MergeState::Remote { .. }
-            | MergeState::RemoteOnlyWithNewStructure(_)
-            | MergeState::RemoteWithNewStructure { .. } => true,
+            | MergeState::RemoteWithNewRemoteStructure { .. } => true,
+            MergeState::LocalOnly(_)
+            | MergeState::LocalOnlyWithNewLocalStructure(_)
+            | MergeState::Local { .. }
+            | MergeState::LocalWithNewLocalStructure { .. }
+            | MergeState::Unchanged { .. }
+            | MergeState::UnchangedWithNewLocalStructure { .. } => false,
+        }
+    }
 
+    /// Returns `true` if the item has a new structure (parent or children)
+    /// that should be updated in the local tree.
+    pub fn should_apply_structure(&self) -> bool {
+        match self {
+            MergeState::LocalOnlyWithNewLocalStructure(_)
+            | MergeState::LocalWithNewLocalStructure { .. }
+            | MergeState::RemoteOnly(_)
+            | MergeState::RemoteOnlyWithNewRemoteStructure(_)
+            | MergeState::Remote { .. }
+            | MergeState::RemoteWithNewRemoteStructure { .. }
+            | MergeState::UnchangedWithNewLocalStructure { .. } => true,
             MergeState::LocalOnly(_) | MergeState::Local { .. } | MergeState::Unchanged { .. } => {
                 false
             }
         }
     }
 
-    /// Returns the reason for (re)uploading this node.
-    pub fn upload_reason(&self) -> UploadReason {
+    /// Returns `true` if the item should be flagged for (re)upload.
+    pub fn should_upload(&self) -> bool {
         match self {
-            MergeState::LocalOnly(_) => UploadReason::LocallyNew,
-            MergeState::RemoteOnly(_) => UploadReason::None,
-            MergeState::Local { .. } => UploadReason::Merged,
-            MergeState::Remote { .. } => UploadReason::None,
-            MergeState::RemoteOnlyWithNewStructure(_) => {
-                // We're reuploading an item that only exists remotely, so it
-                // must have new structure. Otherwise, its merge state would
-                // be remote only, without new structure.
-                UploadReason::NewStructure
+            MergeState::LocalOnly(_)
+            | MergeState::LocalOnlyWithNewLocalStructure(_)
+            | MergeState::Local { .. }
+            | MergeState::LocalWithNewLocalStructure { .. }
+            | MergeState::RemoteOnlyWithNewRemoteStructure(_)
+            | MergeState::RemoteWithNewRemoteStructure { .. } => true,
+            MergeState::RemoteOnly(_)
+            | MergeState::Remote { .. }
+            | MergeState::Unchanged { .. }
+            | MergeState::UnchangedWithNewLocalStructure { .. } => false,
+        }
+    }
+
+    /// Returns a new merge state, indicating that the item has a new merged
+    /// structure that should be applied locally.
+    pub fn with_new_local_structure(self) -> MergeState<'t> {
+        match self {
+            MergeState::LocalOnly(local_node) => {
+                MergeState::LocalOnlyWithNewLocalStructure(local_node)
             }
-            MergeState::RemoteWithNewStructure { local_node, .. } => {
-                if local_node.needs_merge {
-                    // The item exists on both sides, and changed locally, so
-                    // we're uploading to resolve a merge conflict.
-                    UploadReason::Merged
-                } else {
-                    // The item exists on both sides, and didn't change locally,
-                    // so we must be uploading new structure to fix GUIDs or
-                    // divergences.
-                    UploadReason::NewStructure
+            MergeState::LocalOnlyWithNewLocalStructure(local_node) => {
+                MergeState::LocalOnlyWithNewLocalStructure(local_node)
+            }
+            MergeState::Local {
+                local_node,
+                remote_node,
+            } => MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            },
+            MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            } => MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            },
+            MergeState::RemoteOnly(remote_node) => MergeState::RemoteOnly(remote_node),
+            MergeState::RemoteOnlyWithNewRemoteStructure(local_node) => {
+                MergeState::RemoteOnlyWithNewRemoteStructure(local_node)
+            }
+            MergeState::Remote {
+                local_node,
+                remote_node,
+            } => MergeState::Remote {
+                local_node,
+                remote_node,
+            },
+            MergeState::RemoteWithNewRemoteStructure {
+                local_node,
+                remote_node,
+            } => MergeState::RemoteWithNewRemoteStructure {
+                local_node,
+                remote_node,
+            },
+            MergeState::Unchanged {
+                local_node,
+                remote_node,
+            } => {
+                // Once the structure changes, it doesn't matter which side we
+                // pick; we'll need to reupload the item to the server, anyway.
+                MergeState::UnchangedWithNewLocalStructure {
+                    local_node,
+                    remote_node,
                 }
             }
-            MergeState::Unchanged { .. } => UploadReason::None,
+            MergeState::UnchangedWithNewLocalStructure {
+                local_node,
+                remote_node,
+            } => MergeState::UnchangedWithNewLocalStructure {
+                local_node,
+                remote_node,
+            },
         }
     }
 
     /// Returns a new merge state, indicating that the item has a new merged
     /// structure that should be reuploaded to the server.
-    pub(crate) fn with_new_structure(&self) -> MergeState<'t> {
-        match *self {
+    pub fn with_new_remote_structure(self) -> MergeState<'t> {
+        match self {
             MergeState::LocalOnly(local_node) => MergeState::LocalOnly(local_node),
-            MergeState::RemoteOnly(remote_node)
-            | MergeState::RemoteOnlyWithNewStructure(remote_node) => {
-                MergeState::RemoteOnlyWithNewStructure(remote_node)
+            MergeState::LocalOnlyWithNewLocalStructure(local_node) => {
+                MergeState::LocalOnlyWithNewLocalStructure(local_node)
             }
             MergeState::Local {
                 local_node,
@@ -1869,14 +1980,30 @@ impl<'t> MergeState<'t> {
                 local_node,
                 remote_node,
             },
+            MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            } => MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            },
+            MergeState::RemoteOnly(remote_node) => {
+                MergeState::RemoteOnlyWithNewRemoteStructure(remote_node)
+            }
+            MergeState::RemoteOnlyWithNewRemoteStructure(remote_node) => {
+                MergeState::RemoteOnlyWithNewRemoteStructure(remote_node)
+            }
             MergeState::Remote {
                 local_node,
                 remote_node,
-            }
-            | MergeState::RemoteWithNewStructure {
+            } => MergeState::RemoteWithNewRemoteStructure {
                 local_node,
                 remote_node,
-            } => MergeState::RemoteWithNewStructure {
+            },
+            MergeState::RemoteWithNewRemoteStructure {
+                local_node,
+                remote_node,
+            } => MergeState::RemoteWithNewRemoteStructure {
                 local_node,
                 remote_node,
             },
@@ -1891,6 +2018,13 @@ impl<'t> MergeState<'t> {
                     remote_node,
                 }
             }
+            MergeState::UnchangedWithNewLocalStructure {
+                local_node,
+                remote_node,
+            } => MergeState::LocalWithNewLocalStructure {
+                local_node,
+                remote_node,
+            },
         }
     }
 
@@ -1899,14 +2033,16 @@ impl<'t> MergeState<'t> {
     /// for logging and `try_from()`.
     fn node(&self) -> &Node<'t> {
         match self {
-            MergeState::LocalOnly(local_node) | MergeState::Local { local_node, .. } => local_node,
-
+            MergeState::LocalOnly(local_node)
+            | MergeState::LocalOnlyWithNewLocalStructure(local_node)
+            | MergeState::Local { local_node, .. }
+            | MergeState::LocalWithNewLocalStructure { local_node, .. }
+            | MergeState::Unchanged { local_node, .. }
+            | MergeState::UnchangedWithNewLocalStructure { local_node, .. } => local_node,
             MergeState::RemoteOnly(remote_node)
+            | MergeState::RemoteOnlyWithNewRemoteStructure(remote_node)
             | MergeState::Remote { remote_node, .. }
-            | MergeState::RemoteOnlyWithNewStructure(remote_node)
-            | MergeState::RemoteWithNewStructure { remote_node, .. } => remote_node,
-
-            MergeState::Unchanged { local_node, .. } => local_node,
+            | MergeState::RemoteWithNewRemoteStructure { remote_node, .. } => remote_node,
         }
     }
 }
@@ -1915,13 +2051,15 @@ impl<'t> fmt::Display for MergeState<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             MergeState::LocalOnly(_) | MergeState::Local { .. } => "(Local, Local)",
+            MergeState::LocalOnlyWithNewLocalStructure(_)
+            | MergeState::LocalWithNewLocalStructure { .. } => "(Local, New)",
 
             MergeState::RemoteOnly(_) | MergeState::Remote { .. } => "(Remote, Remote)",
-
-            MergeState::RemoteOnlyWithNewStructure(_)
-            | MergeState::RemoteWithNewStructure { .. } => "(Remote, New)",
+            MergeState::RemoteOnlyWithNewRemoteStructure(_)
+            | MergeState::RemoteWithNewRemoteStructure { .. } => "(Remote, New)",
 
             MergeState::Unchanged { .. } => "(Unchanged, Unchanged)",
+            MergeState::UnchangedWithNewLocalStructure { .. } => "(Unchanged, New)",
         })
     }
 }
@@ -1939,4 +2077,214 @@ pub enum Content {
     Bookmark { title: String, url_href: String },
     Folder { title: String },
     Separator { position: i64 },
+}
+
+/// Completion operations to apply to the local tree after a merge. These are
+/// represented as separate structs in `Vec`s instead of enums yielded from an
+/// iterator so that consumers can easily chunk them. Places writes these ops
+/// into temp tables, then runs SQL triggers to apply them.
+#[derive(Clone, Debug, Default)]
+pub struct CompletionOps<'t> {
+    pub change_guids: Vec<ChangeGuid<'t>>,
+    pub apply_remote: Vec<ApplyRemoteItem<'t>>,
+    pub apply_new_local_structure: Vec<ApplyNewLocalStructure<'t>>,
+    pub update_sync_change_counters: Vec<UpdateSyncChangeCounter<'t>>,
+}
+
+/// A completion op to change the local GUID to the merged GUID. This is used
+/// to dedupe new local items to remote ones, as well as to fix up invalid
+/// GUIDs.
+#[derive(Clone, Copy, Debug)]
+pub struct ChangeGuid<'t> {
+    /// The merged node to update.
+    pub merged_node: &'t MergedNode<'t>,
+    /// The level of the node in the merged tree. Desktop uses this to ensure
+    /// that GUID change observers are notified in level order (parents before
+    /// children).
+    pub level: usize,
+}
+
+impl<'t> ChangeGuid<'t> {
+    #[inline]
+    pub fn local_node(&self) -> &Node<'t> {
+        self.merged_node
+            .merge_state
+            .local_node()
+            .expect("Can't change local GUID without local node")
+    }
+}
+
+impl<'t> fmt::Display for ChangeGuid<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Change {} to {}",
+            self.local_node().guid,
+            self.merged_node.guid
+        )
+    }
+}
+
+/// A completion op to insert a new remote item into the local tree, or apply
+/// synced changes to an existing item.
+#[derive(Clone, Copy, Debug)]
+pub struct ApplyRemoteItem<'t> {
+    pub merged_node: &'t MergedNode<'t>,
+    pub level: usize,
+}
+
+impl<'t> ApplyRemoteItem<'t> {
+    #[inline]
+    pub fn remote_node(&self) -> &Node<'t> {
+        self.merged_node
+            .merge_state
+            .remote_node()
+            .expect("Can't apply remote item without remote node")
+    }
+}
+
+impl<'t> fmt::Display for ApplyRemoteItem<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.merged_node.remote_guid_changed() {
+            write!(
+                f,
+                "Apply remote {} as {}",
+                self.remote_node().guid,
+                self.merged_node.guid
+            )
+        } else {
+            write!(f, "Apply remote {}", self.merged_node.guid)
+        }
+    }
+}
+
+/// A completion op to update the parent and position of a local item.
+#[derive(Clone, Copy, Debug)]
+pub struct ApplyNewLocalStructure<'t> {
+    pub merged_node: &'t MergedNode<'t>,
+    pub merged_parent_node: &'t MergedNode<'t>,
+    pub position: usize,
+    pub level: usize,
+}
+
+impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Move {} into {} at {}",
+            self.merged_node.guid, self.merged_parent_node.guid, self.position
+        )
+    }
+}
+
+/// A completion op to flag a local item for upload, or remove its upload flag,
+/// depending on the value of `should_upload`.
+#[derive(Clone, Copy, Debug)]
+pub struct UpdateSyncChangeCounter<'t> {
+    pub merged_node: &'t MergedNode<'t>,
+    pub should_upload: bool,
+}
+
+impl<'t> fmt::Display for UpdateSyncChangeCounter<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.should_upload {
+            write!(f, "Upload {}", self.merged_node.guid)
+        } else {
+            write!(f, "Don't upload {}", self.merged_node.guid)
+        }
+    }
+}
+
+/// Recursively accumulates completion ops, starting at `merged_node` and
+/// drilling down into all its descendants.
+fn accumulate<'t>(actions: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, level: usize) {
+    for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
+        if merged_child_node.merge_state.should_apply_item() {
+            actions.apply_remote.push(ApplyRemoteItem {
+                merged_node: merged_child_node,
+                level,
+            });
+        }
+        // Places stores the parent and position on children, not
+        // parents, so we emit different completion ops depending on the
+        // merge states of the parent and child.
+        match (
+            merged_node.merge_state.should_apply_structure(),
+            merged_child_node.merge_state.should_apply_structure(),
+        ) {
+            (false, true) => {
+                // Only the child changed, so the only possible op is a
+                // GUID change.
+                if merged_child_node.local_guid_changed() {
+                    actions.change_guids.push(ChangeGuid {
+                        merged_node: merged_child_node,
+                        level,
+                    });
+                }
+            }
+            (true, true) => {
+                // Both the parent and child changed, so we emit a
+                // possible GUID change, and an op to update the local
+                // parent and position.
+                if merged_child_node.local_guid_changed() {
+                    actions.change_guids.push(ChangeGuid {
+                        merged_node: merged_child_node,
+                        level,
+                    });
+                }
+                actions
+                    .apply_new_local_structure
+                    .push(ApplyNewLocalStructure {
+                        merged_node: merged_child_node,
+                        merged_parent_node: merged_node,
+                        position,
+                        level,
+                    });
+            }
+            (true, false) => {
+                // Only the parent changed, so we need to check if the
+                // child was repositioned. As an optimization, we only
+                // emit ops for items that actually moved. For example,
+                // if the local children are (A B C D) and the merged
+                // children are (A D C B), only (B D) need to move.
+                let local_child_node = merged_node
+                    .merge_state
+                    .local_node()
+                    .and_then(|local_parent_node| local_parent_node.child(position));
+                let merged_local_child_node = merged_child_node.merge_state.local_node();
+                if local_child_node
+                    .and_then(|m| merged_local_child_node.map(|n| m.guid != n.guid))
+                    .unwrap_or(true)
+                {
+                    actions
+                        .apply_new_local_structure
+                        .push(ApplyNewLocalStructure {
+                            merged_node: merged_child_node,
+                            merged_parent_node: merged_node,
+                            position,
+                            level,
+                        });
+                }
+            }
+            (false, false) => {}
+        }
+        let local_needs_merge = merged_child_node
+            .merge_state
+            .local_node()
+            .map(|node| node.needs_merge)
+            .unwrap_or(false);
+        let should_upload = merged_child_node.merge_state.should_upload();
+        if local_needs_merge != should_upload {
+            // The local item is either flagged for upload when it
+            // doesn't need to be, or not flagged but should be.
+            // Emit an op to update its change counter.
+            actions
+                .update_sync_change_counters
+                .push(UpdateSyncChangeCounter {
+                    merged_node: merged_child_node,
+                    should_upload,
+                });
+        }
+        accumulate(actions, merged_child_node, level + 1);
+    }
 }

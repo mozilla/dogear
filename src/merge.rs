@@ -289,20 +289,22 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         };
 
         let mut merged_node = MergedNode::new(merged_guid, MergeState::LocalOnly(local_node));
-        if local_node.is_folder() {
-            // The local folder doesn't exist remotely, but its children might, so
-            // we still need to recursively walk and merge them. This method will
-            // change the merge state from local to new if any children were moved
-            // or deleted.
-            for local_child_node in local_node.children() {
-                self.signal.err_if_aborted()?;
-                self.merge_local_child_into_merged_node(
-                    &mut merged_node,
-                    local_node,
-                    None,
-                    local_child_node,
-                )?;
-            }
+        // The local folder doesn't exist remotely, but its children might, so
+        // we still need to recursively walk and merge them. This method will
+        // change the merge state from local to new if any children were moved
+        // or deleted.
+        for local_child_node in local_node.children() {
+            self.signal.err_if_aborted()?;
+            self.merge_local_child_into_merged_node(
+                &mut merged_node,
+                local_node,
+                None,
+                local_child_node,
+            )?;
+        }
+
+        if local_node.diverged() {
+            merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
         }
 
         Ok(merged_node)
@@ -334,19 +336,17 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             new_guid
         };
         let mut merged_node = MergedNode::new(merged_guid, MergeState::RemoteOnly(remote_node));
-        if remote_node.is_folder() {
-            // As above, a remote folder's children might still exist locally, so we
-            // need to merge them and update the merge state from remote to new if
-            // any children were moved or deleted.
-            for remote_child_node in remote_node.children() {
-                self.signal.err_if_aborted()?;
-                self.merge_remote_child_into_merged_node(
-                    &mut merged_node,
-                    None,
-                    remote_node,
-                    remote_child_node,
-                )?;
-            }
+        // As above, a remote folder's children might still exist locally, so we
+        // need to merge them and update the merge state from remote to new if
+        // any children were moved or deleted.
+        for remote_child_node in remote_node.children() {
+            self.signal.err_if_aborted()?;
+            self.merge_remote_child_into_merged_node(
+                &mut merged_node,
+                None,
+                remote_node,
+                remote_child_node,
+            )?;
         }
 
         if remote_node.diverged()
@@ -355,7 +355,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         {
             // If the remote structure diverged, the merged item's GUID changed,
             // or the item isn't valid, flag it for reupload.
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
         }
 
         Ok(merged_node)
@@ -448,7 +448,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 }
             }
 
-            ConflictResolution::Remote | ConflictResolution::Unchanged => {
+            ConflictResolution::Remote => {
                 for remote_child_node in remote_node.children() {
                     self.signal.err_if_aborted()?;
                     self.merge_remote_child_into_merged_node(
@@ -468,14 +468,116 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     )?;
                 }
             }
+
+            ConflictResolution::Unchanged => {
+                // The children are the same, so we only need to merge one side.
+                for (local_child_node, remote_child_node) in
+                    local_node.children().zip(remote_node.children())
+                {
+                    self.signal.err_if_aborted()?;
+                    self.merge_unchanged_child_into_merged_node(
+                        &mut merged_node,
+                        local_node,
+                        local_child_node,
+                        remote_node,
+                        remote_child_node,
+                    )?;
+                }
+            }
+        }
+
+        if local_node.diverged() {
+            merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
         }
 
         if remote_node.diverged() || remote_node.validity != Validity::Valid {
             // Flag remotely diverged and invalid items for reupload.
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
         }
 
         Ok(merged_node)
+    }
+
+    /// Merges two nodes with the same parents and positions.
+    ///
+    /// Unlike items that have been moved, or exist only on one side, unchanged
+    /// children can be merged directly.
+    fn merge_unchanged_child_into_merged_node(
+        &mut self,
+        merged_node: &mut MergedNode<'t>,
+        local_parent_node: Node<'t>,
+        local_child_node: Node<'t>,
+        remote_parent_node: Node<'t>,
+        remote_child_node: Node<'t>,
+    ) -> Result<()> {
+        assert!(
+            !self.merged_guids.contains(&local_child_node.guid),
+            "Unchanged local child shouldn't have been merged"
+        );
+        assert!(
+            !self.merged_guids.contains(&remote_child_node.guid),
+            "Unchanged remote child shouldn't have been merged"
+        );
+
+        // Even though the child exists on both sides, it might still be
+        // non-syncable or invalid, so we need to check for structure
+        // changes.
+        let local_structure_change = self.check_for_local_structure_change_of_remote_node(
+            merged_node,
+            remote_parent_node,
+            remote_child_node,
+        )?;
+        let remote_structure_change = self.check_for_remote_structure_change_of_local_node(
+            merged_node,
+            local_parent_node,
+            local_child_node,
+        )?;
+        match (local_structure_change, remote_structure_change) {
+            (StructureChange::Deleted, StructureChange::Deleted) => {
+                // The child is deleted on both sides. We'll need to reupload
+                // and apply a new structure.
+                merged_node.merge_state = merged_node
+                    .merge_state
+                    .with_new_local_structure()
+                    .with_new_remote_structure();
+            }
+            (StructureChange::Deleted, _) => {
+                // The child is deleted locally, but not remotely, so we only
+                // need to reupload a new structure.
+                merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
+            }
+            (_, StructureChange::Deleted) => {
+                // The child is deleted remotely, so we only need to apply a
+                // new local structure.
+                merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
+            }
+            (_, _) => {
+                // The child exists on both sides, so merge it now. If the GUID
+                // changes because it's invalid, we'll need to reupload and
+                // apply the child and its parent.
+                let mut merged_child_node =
+                    self.two_way_merge(local_child_node, remote_child_node)?;
+                if merged_child_node.local_guid_changed() {
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_local_structure();
+                }
+                if merged_node.remote_guid_changed() {
+                    // The merged parent's GUID changed; flag the child for
+                    // reupload with a new `parentid`.
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_remote_structure();
+                }
+                if merged_child_node.remote_guid_changed() {
+                    // The merged child's GUID changed; flag the parent for
+                    // reupload with new `children`.
+                    merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
+                }
+                merged_node.merged_children.push(merged_child_node);
+                self.structure_counts.merged_nodes += 1;
+            }
+        }
+
+        Ok(())
     }
 
     /// Merges a remote child node into a merged folder node. This handles the
@@ -492,9 +594,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
     ///   local and remote children.
     ///
     /// This is the inverse of `merge_local_child_into_merged_node`.
-    ///
-    /// Returns `true` if the merged structure state changed because the remote
-    /// child was locally moved or deleted; `false` otherwise.
     fn merge_remote_child_into_merged_node(
         &mut self,
         merged_node: &mut MergedNode<'t>,
@@ -508,6 +607,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 "Remote child {} already seen in another folder and merged",
                 remote_child_node
             );
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
             return Ok(());
         }
 
@@ -533,7 +633,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         {
             // Flag the merged parent for reupload, since we deleted the
             // remote child.
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
             return Ok(());
         }
 
@@ -564,17 +664,20 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
 
                 let mut merged_child_node =
                     self.two_way_merge(local_child_node, remote_child_node)?;
+                merged_child_node.merge_state =
+                    merged_child_node.merge_state.with_new_local_structure();
                 if merged_node.remote_guid_changed() {
                     // If the parent's GUID changed, flag the child for reupload, so that
                     // its `parentid` is correct.
                     merged_child_node.merge_state =
-                        merged_child_node.merge_state.with_new_structure();
+                        merged_child_node.merge_state.with_new_remote_structure();
                 }
                 if merged_child_node.remote_guid_changed() {
                     // If the child's GUID changed, flag the parent for reupload, so that
                     // its `children` are correct.
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                    merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
                 }
+                merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
                 merged_node.merged_children.push(merged_child_node);
                 self.structure_counts.merged_nodes += 1;
                 return Ok(());
@@ -603,34 +706,55 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     // the remote child. Note that, since we only flag the
                     // remote parent here, we don't need to handle
                     // reparenting and repositioning separately.
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                    merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
                 }
 
                 ConflictResolution::Remote | ConflictResolution::Unchanged => {
                     // The remote move is newer, so we merge the remote
                     // child now and ignore the local move.
-                    trace!(
-                        self.driver,
-                        "Remote child {} moved locally to {} and remotely to {}; \
-                         keeping child in newer remote parent and position",
-                        remote_child_node,
-                        local_parent_node,
-                        remote_parent_node
-                    );
-
-                    let mut merged_child_node =
-                        self.two_way_merge(local_child_node, remote_child_node)?;
+                    let mut merged_child_node = if local_parent_node.guid != remote_parent_node.guid
+                    {
+                        trace!(
+                            self.driver,
+                            "Remote child {} reparented locally to {} and remotely to {}; \
+                             keeping child in newer remote parent",
+                            remote_child_node,
+                            local_parent_node,
+                            remote_parent_node
+                        );
+                        let mut merged_child_node =
+                            self.two_way_merge(local_child_node, remote_child_node)?;
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_local_structure();
+                        merged_child_node
+                    } else {
+                        trace!(
+                            self.driver,
+                            "Remote child {} repositioned locally in {} and remotely in {}; \
+                             keeping child in newer remote position",
+                            remote_child_node,
+                            local_parent_node,
+                            remote_parent_node
+                        );
+                        self.two_way_merge(local_child_node, remote_child_node)?
+                    };
+                    if merged_child_node.local_guid_changed() {
+                        merged_child_node.merge_state =
+                            merged_child_node.merge_state.with_new_local_structure();
+                    }
                     if merged_node.remote_guid_changed() {
                         // The merged parent's GUID changed; flag the child for
                         // reupload with a new `parentid`.
                         merged_child_node.merge_state =
-                            merged_child_node.merge_state.with_new_structure();
+                            merged_child_node.merge_state.with_new_remote_structure();
                     }
                     if merged_child_node.remote_guid_changed() {
                         // The merged child's GUID changed; flag the parent for
                         // reupload with new `children`.
-                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        merged_node.merge_state =
+                            merged_node.merge_state.with_new_remote_structure();
                     }
+                    merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
                     merged_node.merged_children.push(merged_child_node);
                     self.structure_counts.merged_nodes += 1;
                 }
@@ -659,12 +783,18 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         } else {
             self.merge_remote_only_node(remote_child_node)
         }?;
+        if merged_child_node.local_guid_changed() {
+            merged_child_node.merge_state =
+                merged_child_node.merge_state.with_new_local_structure();
+        }
         if merged_node.remote_guid_changed() {
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+            merged_child_node.merge_state =
+                merged_child_node.merge_state.with_new_remote_structure();
         }
         if merged_child_node.remote_guid_changed() {
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
         }
+        merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
         merged_node.merged_children.push(merged_child_node);
         self.structure_counts.merged_nodes += 1;
         Ok(())
@@ -673,9 +803,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
     /// Merges a local child node into a merged folder node.
     ///
     /// This is the inverse of `merge_remote_child_into_merged_node`.
-    ///
-    /// Returns `true` if the merged structure state changed because the local
-    /// child doesn't exist remotely or was locally moved; `false` otherwise.
     fn merge_local_child_into_merged_node(
         &mut self,
         merged_node: &mut MergedNode<'t>,
@@ -690,6 +817,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 "Local child {} already seen in another folder and merged",
                 local_child_node
             );
+            merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
             return Ok(());
         }
 
@@ -711,6 +839,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         {
             // Since we're merging local nodes, we don't need to flag the merged
             // parent for reupload.
+            merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
             return Ok(());
         }
 
@@ -752,8 +881,13 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 // canonical, while iOS is stricter and requires both to match.
                 let mut merged_child_node =
                     self.two_way_merge(local_child_node, remote_child_node)?;
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                if merged_child_node.local_guid_changed() {
+                    merged_child_node.merge_state =
+                        merged_child_node.merge_state.with_new_local_structure();
+                }
+                merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
+                merged_child_node.merge_state =
+                    merged_child_node.merge_state.with_new_remote_structure();
                 merged_node.merged_children.push(merged_child_node);
                 self.structure_counts.merged_nodes += 1;
                 return Ok(());
@@ -783,9 +917,14 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                         // reupload. See above for why.
                         let mut merged_child_node =
                             self.two_way_merge(local_child_node, remote_child_node)?;
-                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        if merged_child_node.local_guid_changed() {
+                            merged_child_node.merge_state =
+                                merged_child_node.merge_state.with_new_local_structure();
+                        }
+                        merged_node.merge_state =
+                            merged_node.merge_state.with_new_remote_structure();
                         merged_child_node.merge_state =
-                            merged_child_node.merge_state.with_new_structure();
+                            merged_child_node.merge_state.with_new_remote_structure();
                         merged_node.merged_children.push(merged_child_node);
                         self.structure_counts.merged_nodes += 1;
                     } else {
@@ -802,15 +941,21 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                         // merge and flag the parent for reupload...
                         let mut merged_child_node =
                             self.two_way_merge(local_child_node, remote_child_node)?;
-                        merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                        if merged_child_node.local_guid_changed() {
+                            merged_child_node.merge_state =
+                                merged_child_node.merge_state.with_new_local_structure();
+                        }
+                        merged_node.merge_state =
+                            merged_node.merge_state.with_new_remote_structure();
                         if merged_node.remote_guid_changed() {
                             // ...Unless the merged parent's GUID also changed,
                             // in which case we also need to flag the
                             // repositioned child for reupload, so that its
                             // `parentid` is correct.
                             merged_child_node.merge_state =
-                                merged_child_node.merge_state.with_new_structure();
+                                merged_child_node.merge_state.with_new_remote_structure();
                         }
+
                         merged_node.merged_children.push(merged_child_node);
                         self.structure_counts.merged_nodes += 1;
                     }
@@ -839,6 +984,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                             remote_parent_node
                         );
                     }
+                    merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
                 }
             }
 
@@ -865,19 +1011,30 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             // and merge.
             let mut merged_child_node =
                 self.two_way_merge(local_child_node, remote_child_node_by_content)?;
+            if merged_child_node.local_guid_changed() {
+                merged_child_node.merge_state =
+                    merged_child_node.merge_state.with_new_local_structure();
+            }
             if merged_node.remote_guid_changed() {
-                merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+                merged_child_node.merge_state =
+                    merged_child_node.merge_state.with_new_remote_structure();
             }
             if merged_child_node.remote_guid_changed() {
-                merged_node.merge_state = merged_node.merge_state.with_new_structure();
+                merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
             }
+            merged_node.merge_state = merged_node.merge_state.with_new_local_structure();
             merged_child_node
         } else {
             // The local child doesn't exist remotely, so flag the merged parent and
             // new child for upload, and walk its descendants.
             let mut merged_child_node = self.merge_local_only_node(local_child_node)?;
-            merged_node.merge_state = merged_node.merge_state.with_new_structure();
-            merged_child_node.merge_state = merged_child_node.merge_state.with_new_structure();
+            if merged_child_node.local_guid_changed() {
+                merged_child_node.merge_state =
+                    merged_child_node.merge_state.with_new_local_structure();
+            }
+            merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
+            merged_child_node.merge_state =
+                merged_child_node.merge_state.with_new_remote_structure();
             merged_child_node
         };
         merged_node.merged_children.push(merged_child_node);
@@ -893,8 +1050,8 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         remote_node: Node<'t>,
     ) -> (ConflictResolution, ConflictResolution) {
         if remote_node.is_root() {
-            // Don't reorder local roots.
-            return (ConflictResolution::Local, ConflictResolution::Local);
+            // Don't touch the Places root; it's not synced, anyway.
+            return (ConflictResolution::Unchanged, ConflictResolution::Local);
         }
 
         match (local_node.needs_merge, remote_node.needs_merge) {
@@ -907,26 +1064,32 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 } else {
                     // For other items, we check the validity to decide
                     // which side to take.
-                    match remote_node.validity {
-                        Validity::Valid | Validity::Reupload => {
-                            // If the remote item is valid, or valid but needs
-                            // reupload, compare timestamps to decide which side is
-                            // newer.
+                    match (local_node.validity, remote_node.validity) {
+                        // If both are invalid, it doesn't matter which side
+                        // we pick; the item will be deleted, anyway.
+                        (Validity::Replace, Validity::Replace) => ConflictResolution::Unchanged,
+                        // If only one side is invalid, pick the other side.
+                        // This loses changes from that side, but we can't
+                        // apply or upload those changes, anyway.
+                        (Validity::Replace, _) => ConflictResolution::Remote,
+                        (_, Validity::Replace) => ConflictResolution::Local,
+                        (_, _) => {
+                            // Otherwise, the item is either valid, or valid
+                            // but needs to be reuploaded or reapplied, so
+                            // compare timestamps to decide which side is newer.
                             if local_node.age < remote_node.age {
                                 ConflictResolution::Local
                             } else {
                                 ConflictResolution::Remote
                             }
                         }
-                        // If the remote item must be replaced, take the local
-                        // side. This _loses remote changes_, but we can't
-                        // apply those changes, anyway.
-                        Validity::Replace => ConflictResolution::Local,
                     }
                 };
                 // For children, it's easier: we always use the newer side, even
                 // if we're taking local changes for the item.
-                let children = if local_node.age < remote_node.age {
+                let children = if local_node.has_matching_children(remote_node) {
+                    ConflictResolution::Unchanged
+                } else if local_node.age < remote_node.age {
                     // The local change is newer, so merge local children first,
                     // followed by remaining unmerged remote children.
                     ConflictResolution::Local
@@ -942,7 +1105,16 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 // The item changed locally, but not remotely. Prefer the local
                 // item, then merge local children first, followed by remote
                 // children.
-                (ConflictResolution::Local, ConflictResolution::Local)
+                let item = match local_node.validity {
+                    Validity::Valid | Validity::Reupload => ConflictResolution::Local,
+                    Validity::Replace => ConflictResolution::Remote,
+                };
+                let children = if local_node.has_matching_children(remote_node) {
+                    ConflictResolution::Unchanged
+                } else {
+                    ConflictResolution::Local
+                };
+                (item, children)
             }
 
             (false, true) => {
@@ -959,13 +1131,32 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                         Validity::Replace => ConflictResolution::Local,
                     }
                 };
+                let children = if local_node.has_matching_children(remote_node) {
+                    ConflictResolution::Unchanged
+                } else {
+                    ConflictResolution::Remote
+                };
                 // For children, we always use the remote side.
-                (item, ConflictResolution::Remote)
+                (item, children)
             }
 
             (false, false) => {
-                // The item is unchanged on both sides.
-                (ConflictResolution::Unchanged, ConflictResolution::Unchanged)
+                // The item's children differ, even though it's not flagged as
+                // unmerged, so we prefer the newer side for children.
+                let item = match (local_node.validity, remote_node.validity) {
+                    (Validity::Replace, Validity::Replace) => ConflictResolution::Unchanged,
+                    (_, Validity::Replace) => ConflictResolution::Local,
+                    (Validity::Replace, _) => ConflictResolution::Remote,
+                    (_, _) => ConflictResolution::Unchanged,
+                };
+                let children = if local_node.has_matching_children(remote_node) {
+                    ConflictResolution::Unchanged
+                } else if local_node.age < remote_node.age {
+                    ConflictResolution::Local
+                } else {
+                    ConflictResolution::Remote
+                };
+                (item, children)
             }
         }
     }
@@ -1023,6 +1214,11 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         if !remote_node.is_syncable() {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it, even if it's syncable or moved locally.
+            trace!(
+                self.driver,
+                "Deleting non-syncable remote node {}",
+                remote_node
+            );
             return self.delete_remote_node(merged_node, remote_node);
         }
 
@@ -1031,6 +1227,12 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 if !local_node.is_syncable() {
                     // The remote node is syncable, but the local node is
                     // non-syncable. Unconditionally delete it.
+                    trace!(
+                        self.driver,
+                        "Remote node {} is syncable, but local node {} isn't; deleting",
+                        remote_node,
+                        local_node
+                    );
                     return self.delete_remote_node(merged_node, remote_node);
                 }
                 if local_node.validity == Validity::Replace
@@ -1119,6 +1321,11 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         if !local_node.is_syncable() {
             // If the local node is known to be non-syncable, we unconditionally
             // delete it, even if it's syncable or moved remotely.
+            trace!(
+                self.driver,
+                "Deleting non-syncable local node {}",
+                local_node
+            );
             return self.delete_local_node(merged_node, local_node);
         }
 
@@ -1130,6 +1337,12 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     // query in a previous sync, and later saw the left pane
                     // root on the server. Since we now have the complete
                     // subtree, we can remove it.
+                    trace!(
+                        self.driver,
+                        "Local node {} is syncable, but remote node {} isn't; deleting",
+                        local_node,
+                        remote_node
+                    );
                     return self.delete_local_node(merged_node, local_node);
                 }
                 if remote_node.validity == Validity::Replace
@@ -1248,9 +1461,14 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     } else {
                         self.merge_remote_only_node(remote_child_node)
                     }?;
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_orphan_node.merge_state =
-                        merged_orphan_node.merge_state.with_new_structure();
+                    merged_node.merge_state = merged_node
+                        .merge_state
+                        .with_new_local_structure()
+                        .with_new_remote_structure();
+                    merged_orphan_node.merge_state = merged_orphan_node
+                        .merge_state
+                        .with_new_local_structure()
+                        .with_new_remote_structure();
                     merged_node.merged_children.push(merged_orphan_node);
                     self.structure_counts.merged_nodes += 1;
                 }
@@ -1306,9 +1524,14 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     } else {
                         self.merge_local_only_node(local_child_node)
                     }?;
-                    merged_node.merge_state = merged_node.merge_state.with_new_structure();
-                    merged_orphan_node.merge_state =
-                        merged_orphan_node.merge_state.with_new_structure();
+                    merged_node.merge_state = merged_node
+                        .merge_state
+                        .with_new_local_structure()
+                        .with_new_remote_structure();
+                    merged_orphan_node.merge_state = merged_orphan_node
+                        .merge_state
+                        .with_new_local_structure()
+                        .with_new_remote_structure();
                     merged_node.merged_children.push(merged_orphan_node);
                     self.structure_counts.merged_nodes += 1;
                 }
