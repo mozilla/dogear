@@ -145,13 +145,6 @@ impl fmt::Display for Tree {
     }
 }
 
-#[cfg(test)]
-impl PartialEq for Tree {
-    fn eq(&self, other: &Tree) -> bool {
-        self.root() == other.root() && self.deletions().eq(other.deletions())
-    }
-}
-
 /// A tree builder builds a bookmark tree structure from a flat list of items
 /// and parent-child associations.
 ///
@@ -1474,25 +1467,6 @@ impl<'t> fmt::Display for Node<'t> {
     }
 }
 
-#[cfg(test)]
-impl<'t> PartialEq for Node<'t> {
-    fn eq(&self, other: &Node<'_>) -> bool {
-        match (self.parent(), other.parent()) {
-            (Some(parent), Some(other_parent)) => {
-                if parent.1.item != other_parent.1.item {
-                    return false;
-                }
-            }
-            (Some(_), None) | (None, Some(_)) => return false,
-            (None, None) => {}
-        }
-        if self.1.item != other.1.item {
-            return false;
-        }
-        self.children().eq(other.children())
-    }
-}
-
 /// An item in a local or remote bookmark tree.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Item {
@@ -1610,30 +1584,6 @@ impl<'t> MergedRoot<'t> {
         &self.node
     }
 
-    /// Returns a flattened `Vec` of the root node's descendants, excluding the
-    /// root node itself.
-    pub fn descendants(&self) -> Vec<MergedDescendant<'_>> {
-        fn accumulate<'t>(
-            results: &mut Vec<MergedDescendant<'t>>,
-            merged_node: &'t MergedNode<'t>,
-            level: usize,
-        ) {
-            results.reserve(merged_node.merged_children.len());
-            for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
-                results.push(MergedDescendant {
-                    merged_parent_node: &merged_node,
-                    level: level + 1,
-                    position,
-                    merged_node: merged_child_node,
-                });
-                accumulate(results, merged_child_node, level + 1);
-            }
-        }
-        let mut results = Vec::with_capacity(self.size_hint);
-        accumulate(&mut results, &self.node, 0);
-        results
-    }
-
     /// Returns a sequence of completion operations, or "completion ops", to
     /// apply to the local tree so that it matches the merged tree.
     pub fn completion_ops(&self) -> CompletionOps<'_> {
@@ -1646,38 +1596,6 @@ impl<'t> MergedRoot<'t> {
     /// similar to `Node::to_ascii_string`.
     pub fn to_ascii_string(&self) -> String {
         self.node.to_ascii_fragment("")
-    }
-
-    /// Lets us avoid needing to specify the target type in tests.
-    #[cfg(test)]
-    pub(crate) fn into_tree(self) -> Result<Tree> {
-        self.try_into()
-    }
-}
-
-#[cfg(test)]
-impl<'t> TryFrom<MergedRoot<'t>> for Tree {
-    type Error = Error;
-    fn try_from(merged_root: MergedRoot<'t>) -> Result<Tree> {
-        fn to_item(merged_node: &MergedNode<'_>) -> Item {
-            let node = merged_node.merge_state.node();
-            let mut item = Item::new(merged_node.guid.clone(), node.kind);
-            item.age = node.age;
-            item.needs_merge = merged_node.merge_state.should_upload();
-            item
-        }
-
-        let mut b = Tree::with_root(to_item(&merged_root.node));
-        for MergedDescendant {
-            merged_parent_node,
-            merged_node,
-            ..
-        } in merged_root.descendants()
-        {
-            b.item(to_item(merged_node))?
-                .by_structure(&merged_parent_node.guid)?;
-        }
-        b.try_into()
     }
 }
 
@@ -1742,16 +1660,6 @@ impl<'t> fmt::Display for MergedNode<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.guid, self.merge_state)
     }
-}
-
-/// A descendant holds a merged node, merged parent node, position in the
-/// merged parent, and level in the merged tree.
-#[derive(Clone, Copy, Debug)]
-pub struct MergedDescendant<'t> {
-    pub merged_parent_node: &'t MergedNode<'t>,
-    pub level: usize,
-    pub position: usize,
-    pub merged_node: &'t MergedNode<'t>,
 }
 
 /// The merge state indicates which node we should prefer, local or remote, when

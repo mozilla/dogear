@@ -26,8 +26,8 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
 use crate::tree::{
-    Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, Problem, ProblemCounts,
-    Problems, Tree, Validity,
+    Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, MergeState, MergedNode,
+    Problem, ProblemCounts, Problems, Tree, Validity,
 };
 
 #[derive(Debug)]
@@ -106,6 +106,89 @@ macro_rules! nodes {
     }};
 }
 
+#[derive(Debug)]
+enum MergeStateTag {
+    Local,
+    LocalWithNewLocalStructure,
+    Remote,
+    RemoteWithNewRemoteStructure,
+    Unchanged,
+    UnchangedWithNewLocalStructure,
+}
+
+#[derive(Debug)]
+struct TestMergedNode {
+    guid: Guid,
+    state: MergeStateTag,
+    children: Vec<TestMergedNode>,
+}
+
+impl TestMergedNode {
+    fn new(guid: Guid, state: MergeStateTag) -> TestMergedNode {
+        TestMergedNode {
+            guid,
+            state,
+            children: Vec::new(),
+        }
+    }
+}
+
+impl<'t> PartialEq<MergedNode<'t>> for TestMergedNode {
+    fn eq(&self, other: &MergedNode<'t>) -> bool {
+        if self.guid != other.guid {
+            return false;
+        }
+        let merge_state_matches = match (&self.state, other.merge_state) {
+            (MergeStateTag::Local, MergeState::LocalOnly(_)) => true,
+            (
+                MergeStateTag::LocalWithNewLocalStructure,
+                MergeState::LocalOnlyWithNewLocalStructure(_),
+            ) => true,
+            (MergeStateTag::Remote, MergeState::RemoteOnly(_)) => true,
+            (
+                MergeStateTag::RemoteWithNewRemoteStructure,
+                MergeState::RemoteOnlyWithNewRemoteStructure(_),
+            ) => true,
+            (MergeStateTag::Local, MergeState::Local { .. }) => true,
+            (
+                MergeStateTag::LocalWithNewLocalStructure,
+                MergeState::LocalWithNewLocalStructure { .. },
+            ) => true,
+            (MergeStateTag::Remote, MergeState::Remote { .. }) => true,
+            (
+                MergeStateTag::RemoteWithNewRemoteStructure,
+                MergeState::RemoteWithNewRemoteStructure { .. },
+            ) => true,
+            (MergeStateTag::Unchanged, MergeState::Unchanged { .. }) => true,
+            (
+                MergeStateTag::UnchangedWithNewLocalStructure,
+                MergeState::UnchangedWithNewLocalStructure { .. },
+            ) => true,
+            _ => false,
+        };
+        if !merge_state_matches {
+            return false;
+        }
+        self.children == other.merged_children
+    }
+}
+
+macro_rules! merged_nodes {
+    ($children:tt) => { merged_nodes!(ROOT_GUID, Local, $children) };
+    ($guid:expr, $state:ident) => {
+        TestMergedNode::new(Guid::from($guid), MergeStateTag::$state)
+    };
+    ($guid:expr, $state:ident, { $(( $($children:tt)+ )),* }) => {{
+        #[allow(unused_mut)]
+        let mut node = merged_nodes!($guid, $state);
+        $({
+            let child = merged_nodes!($($children)*);
+            node.children.push(child);
+        })*
+        node
+    }};
+}
+
 fn before_each() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -156,32 +239,29 @@ fn reparent_and_reposition() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkFFFF", RemoteWithNewRemoteStructure)
         }),
-        ("unfiled_____", Folder, {
-            ("folderBBBBBB", Folder, {
-                ("bookmarkDDDD", Bookmark),
-                ("bookmarkAAAA", Bookmark),
-                ("bookmarkCCCC", Bookmark)
+        ("unfiled_____", Remote, {
+            ("folderBBBBBB", Remote, {
+                ("bookmarkDDDD", Remote),
+                ("bookmarkAAAA", Remote),
+                ("bookmarkCCCC", Remote)
             })
         }),
-        ("toolbar_____", Folder, {
-            ("folderAAAAAA", Folder[needs_merge = true], {
-                ("bookmarkEEEE", Bookmark)
+        ("toolbar_____", Remote, {
+            ("folderAAAAAA", LocalWithNewLocalStructure, {
+                ("bookmarkEEEE", Remote)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 10,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -220,23 +300,20 @@ fn move_into_parent_sibling() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("folderAAAAAA", Folder),
-            ("folderCCCCCC", Folder, {
-                ("bookmarkBBBB", Bookmark)
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("folderAAAAAA", Remote),
+            ("folderCCCCCC", Remote, {
+                ("bookmarkBBBB", Remote)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 4,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -301,35 +378,34 @@ fn reorder_and_insert() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
             // The server has an older menu, so we should use the local order (C A B)
             // as the base, then append (I J).
-            ("bookmarkCCCC", Bookmark),
-            ("bookmarkAAAA", Bookmark),
-            ("bookmarkBBBB", Bookmark),
-            ("bookmarkIIII", Bookmark),
-            ("bookmarkJJJJ", Bookmark)
+            ("bookmarkCCCC", Unchanged),
+            ("bookmarkAAAA", Unchanged),
+            ("bookmarkBBBB", Unchanged),
+            ("bookmarkIIII", Remote),
+            ("bookmarkJJJJ", Remote)
         }),
-        ("toolbar_____", Folder[needs_merge = true, age = 5], {
+        ("toolbar_____", LocalWithNewLocalStructure, {
             // The server has a newer toolbar, so we should use the remote order (F D E)
-            // as the base, then append (G H).
-            ("bookmarkFFFF", Bookmark),
-            ("bookmarkDDDD", Bookmark),
-            ("bookmarkEEEE", Bookmark),
-            ("bookmarkGGGG", Bookmark[needs_merge = true]),
-            ("bookmarkHHHH", Bookmark[needs_merge = true])
+            // as the base, then append (G H). However, we always prefer the local state
+            // for roots, to avoid clobbering titles, so this is
+            // `LocalWithNewLocalStructure` instead of `RemoteWithNewRemoteStructure`.
+            ("bookmarkFFFF", Unchanged),
+            ("bookmarkDDDD", Unchanged),
+            ("bookmarkEEEE", Unchanged),
+            ("bookmarkGGGG", Local),
+            ("bookmarkHHHH", Local)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -393,18 +469,16 @@ fn unchanged_newer_changed_older() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkBBBB", Bookmark[age = 5]),
-            ("bookmarkEEEE", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkBBBB", Unchanged),
+            ("bookmarkEEEE", LocalWithNewLocalStructure)
         }),
-        ("toolbar_____", Folder[needs_merge = true, age = 5], {
-            ("bookmarkDDDD", Bookmark[age = 5]),
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("bookmarkDDDD", Unchanged),
+            ("bookmarkFFFF", RemoteWithNewRemoteStructure)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["folderAAAAAA", "folderCCCCCC"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
@@ -416,8 +490,7 @@ fn unchanged_newer_changed_older() {
         merged_deletions: 2,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -500,35 +573,32 @@ fn newer_local_moves() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("folderDDDDDD", Folder[needs_merge = true], {
-                ("bookmarkCCCC", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("menu________", Local, {
+            ("folderDDDDDD", Local, {
+                ("bookmarkCCCC", Local)
             })
         }),
-        ("toolbar_____", Folder[needs_merge = true], {
-            ("folderHHHHHH", Folder[needs_merge = true], {
-                ("bookmarkGGGG", Bookmark[needs_merge = true])
+        ("toolbar_____", Local, {
+            ("folderHHHHHH", Local, {
+                ("bookmarkGGGG", Local)
             }),
-            ("folderFFFFFF", Folder[needs_merge = true]),
-            ("bookmarkEEEE", Bookmark[age = 10])
+            ("folderFFFFFF", Local),
+            ("bookmarkEEEE", Unchanged)
         }),
-        ("unfiled_____", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark[needs_merge = true])
+        ("unfiled_____", Local, {
+            ("bookmarkAAAA", Local)
         }),
-        ("mobile______", Folder[needs_merge = true], {
-            ("folderBBBBBB", Folder[needs_merge = true])
+        ("mobile______", Local, {
+            ("folderBBBBBB", Local)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -609,35 +679,32 @@ fn newer_remote_moves() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true, age = 5], {
-            ("folderDDDDDD", Folder, {
-                ("bookmarkGGGG", Bookmark)
+    let expected_tree = merged_nodes!({
+        ("menu________", Local, {
+            ("folderDDDDDD", Remote, {
+                ("bookmarkGGGG", Remote)
             })
         }),
-        ("toolbar_____", Folder[needs_merge = true, age = 5], {
-            ("folderFFFFFF", Folder),
-            ("bookmarkEEEE", Bookmark[age = 10]),
-            ("folderHHHHHH", Folder, {
-                ("bookmarkCCCC", Bookmark)
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("folderFFFFFF", Remote),
+            ("bookmarkEEEE", Unchanged),
+            ("folderHHHHHH", Remote, {
+                ("bookmarkCCCC", Remote)
             })
         }),
-        ("unfiled_____", Folder[needs_merge = true, age = 5], {
-            ("folderBBBBBB", Folder)
+        ("unfiled_____", LocalWithNewLocalStructure, {
+            ("folderBBBBBB", Remote)
         }),
-        ("mobile______", Folder[needs_merge = true, age = 5], {
-            ("bookmarkAAAA", Bookmark)
+        ("mobile______", LocalWithNewLocalStructure, {
+            ("bookmarkAAAA", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 12,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -695,26 +762,23 @@ fn value_structure_conflict() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder, {
-            ("folderAAAAAA", Folder[needs_merge = true, age = 10], {
-                ("bookmarkCCCC", Bookmark)
+    let expected_tree = merged_nodes!({
+        ("menu________", Unchanged, {
+            ("folderAAAAAA", Local, {
+                ("bookmarkCCCC", Unchanged)
             }),
-            ("folderDDDDDD", Folder[needs_merge = true, age = 5], {
-                ("bookmarkEEEE", Bookmark[age = 5]),
-                ("bookmarkBBBB", Bookmark[needs_merge = true])
+            ("folderDDDDDD", RemoteWithNewRemoteStructure, {
+                ("bookmarkEEEE", Remote),
+                ("bookmarkBBBB", Local)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 6,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -767,31 +831,28 @@ fn complex_move_with_additions() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder, {
-            ("bookmarkCCCC", Bookmark)
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("menu________", UnchangedWithNewLocalStructure, {
+            ("bookmarkCCCC", Remote)
         }),
-        ("toolbar_____", Folder, {
-            ("folderAAAAAA", Folder[needs_merge = true], {
+        ("toolbar_____", Remote, {
+            ("folderAAAAAA", RemoteWithNewRemoteStructure, {
                 // We can guarantee child order (B E D), since we always walk remote
                 // children first, and the remote folder A record is newer than the
                 // local folder. If the local folder were newer, the order would be
                 // (D B E).
-                ("bookmarkBBBB", Bookmark),
-                ("bookmarkEEEE", Bookmark),
-                ("bookmarkDDDD", Bookmark[needs_merge = true])
+                ("bookmarkBBBB", Unchanged),
+                ("bookmarkEEEE", Remote),
+                ("bookmarkDDDD", Local)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 7,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -862,25 +923,23 @@ fn complex_orphaning() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("toolbar_____", Folder, {
-            ("folderAAAAAA", Folder[needs_merge = true], {
+    let expected_tree = merged_nodes!({
+        ("toolbar_____", Unchanged, {
+            ("folderAAAAAA", RemoteWithNewRemoteStructure, {
                 // B was deleted remotely, so F moved to A, the closest
                 // surviving parent.
-                ("bookmarkFFFF", Bookmark[needs_merge = true])
+                ("bookmarkFFFF", LocalWithNewLocalStructure)
             })
         }),
-        ("menu________", Folder, {
-            ("folderCCCCCC", Folder, {
-                ("folderDDDDDD", Folder[needs_merge = true], {
+        ("menu________", Unchanged, {
+            ("folderCCCCCC", Unchanged, {
+                ("folderDDDDDD", LocalWithNewLocalStructure, {
                     // E was deleted locally, so G moved to D.
-                    ("bookmarkGGGG", Bookmark[needs_merge = true])
+                    ("bookmarkGGGG", RemoteWithNewRemoteStructure)
                 })
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["folderBBBBBB", "folderEEEEEE"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
@@ -892,8 +951,7 @@ fn complex_orphaning() {
         merged_deletions: 2,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -964,22 +1022,20 @@ fn locally_modified_remotely_deleted() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("toolbar_____", Folder, {
-            ("folderAAAAAA", Folder[needs_merge = true], {
-                ("bookmarkFFFF", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("toolbar_____", Unchanged, {
+            ("folderAAAAAA", RemoteWithNewRemoteStructure, {
+                ("bookmarkFFFF", LocalWithNewLocalStructure)
             })
         }),
-        ("menu________", Folder, {
-            ("folderCCCCCC", Folder, {
-                ("folderDDDDDD", Folder[needs_merge = true], {
-                    ("bookmarkGGGG", Bookmark[needs_merge = true])
+        ("menu________", Unchanged, {
+            ("folderCCCCCC", Unchanged, {
+                ("folderDDDDDD", LocalWithNewLocalStructure, {
+                    ("bookmarkGGGG", RemoteWithNewRemoteStructure)
                 })
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["folderBBBBBB", "folderEEEEEE"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
@@ -991,8 +1047,7 @@ fn locally_modified_remotely_deleted() {
         merged_deletions: 2,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1053,15 +1108,13 @@ fn locally_deleted_remotely_modified() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark),
-            ("bookmarkFFFF", Bookmark[needs_merge = true]),
-            ("bookmarkGGGG", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkAAAA", Remote),
+            ("bookmarkFFFF", RemoteWithNewRemoteStructure),
+            ("bookmarkGGGG", RemoteWithNewRemoteStructure)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec![
         "bookmarkCCCC",
         "bookmarkEEEE",
@@ -1078,8 +1131,7 @@ fn locally_deleted_remotely_modified() {
         merged_deletions: 4,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1109,17 +1161,16 @@ fn nonexistent_on_one_side() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
-        .into_tree()
-        .unwrap();
+    let mut expected_root = Item::new(ROOT_GUID, Kind::Folder);
+    expected_root.needs_merge = true;
+    let expected_tree = merged_nodes!(ROOT_GUID, Unchanged, {});
     let expected_deletions = vec!["bookmarkAAAA", "bookmarkBBBB"];
     let expected_telem = StructureCounts {
         merged_deletions: 2,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1184,20 +1235,18 @@ fn clear_folder_then_delete() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkBBBB", Bookmark),
-            ("bookmarkEEEE", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkBBBB", Remote),
+            ("bookmarkEEEE", Local)
         }),
-        ("mobile______", Folder[needs_merge = true], {
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        ("mobile______", Local, {
+            ("bookmarkFFFF", Local)
         }),
-        ("unfiled_____", Folder, {
-            ("bookmarkCCCC", Bookmark)
+        ("unfiled_____", Remote, {
+            ("bookmarkCCCC", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["folderAAAAAA", "folderDDDDDD"];
     let expected_telem = StructureCounts {
         merged_nodes: 7,
@@ -1205,8 +1254,7 @@ fn clear_folder_then_delete() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1273,18 +1321,16 @@ fn newer_move_to_deleted() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkEEEE", Bookmark[needs_merge = true]),
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkEEEE", LocalWithNewLocalStructure),
+            ("bookmarkFFFF", RemoteWithNewRemoteStructure)
         }),
-        ("toolbar_____", Folder[needs_merge = true], {
-            ("bookmarkDDDD", Bookmark[needs_merge = true]),
-            ("bookmarkBBBB", Bookmark[age = 5])
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("bookmarkDDDD", Local),
+            ("bookmarkBBBB", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["folderAAAAAA", "folderCCCCCC"];
     let expected_telem = StructureCounts {
         remote_revives: 0,
@@ -1296,8 +1342,7 @@ fn newer_move_to_deleted() {
         merged_deletions: 2,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1377,16 +1422,14 @@ fn deduping_local_newer() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark[needs_merge = true]),
-            ("bookmarkAAA4", Bookmark[needs_merge = true]),
-            ("bookmarkAAA3", Bookmark[needs_merge = true]),
-            ("bookmarkAAA5", Bookmark)
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkAAAA", LocalWithNewLocalStructure),
+            ("bookmarkAAA4", LocalWithNewLocalStructure),
+            ("bookmarkAAA3", Local),
+            ("bookmarkAAA5", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1397,8 +1440,7 @@ fn deduping_local_newer() {
         merged_deletions: 0,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -1533,24 +1575,22 @@ fn deduping_remote_newer() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true, age = 5], {
-            ("folderAAAAAA", Folder[needs_merge = true], {
-                ("bookmarkBBBB", Bookmark[age = 10]),
-                ("bookmarkCCC1", Bookmark),
-                ("bookmarkCCCC", Bookmark[needs_merge = true, age = 5])
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("folderAAAAAA", RemoteWithNewRemoteStructure, {
+                ("bookmarkBBBB", Unchanged),
+                ("bookmarkCCC1", Remote),
+                ("bookmarkCCCC", Local)
             }),
-            ("folderDDDDD1", Folder, {
-                ("bookmarkEEE1", Bookmark),
-                ("separatorFF1", Separator)
+            ("folderDDDDD1", Remote, {
+                ("bookmarkEEE1", Remote),
+                ("separatorFF1", Remote)
             }),
-            ("separatorGG1", Separator),
-            ("bookmarkHHH1", Bookmark),
-            ("queryIIIIII1", Query)
+            ("separatorGG1", Remote),
+            ("bookmarkHHH1", Remote),
+            ("queryIIIIII1", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1561,8 +1601,7 @@ fn deduping_remote_newer() {
         merged_deletions: 0,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -1681,23 +1720,21 @@ fn complex_deduping() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("folderAAAAA1", Folder[needs_merge = true], {
-                ("bookmarkBBB1", Bookmark),
-                ("bookmarkCCCC", Bookmark[needs_merge = true, age = 10])
+    let expected_tree = merged_nodes!({
+        ("menu________", LocalWithNewLocalStructure, {
+            ("folderAAAAA1", RemoteWithNewRemoteStructure, {
+                ("bookmarkBBB1", Remote),
+                ("bookmarkCCCC", Local)
             }),
-            ("folderDDDDD1", Folder[needs_merge = true], {
-                ("bookmarkEEE1", Bookmark)
+            ("folderDDDDD1", LocalWithNewLocalStructure, {
+                ("bookmarkEEE1", Remote)
             }),
-            ("folderFFFFF1", Folder, {
-                ("bookmarkGGG1", Bookmark[age = 5]),
-                ("bookmarkHHH1", Bookmark)
+            ("folderFFFFF1", Remote, {
+                ("bookmarkGGG1", Remote),
+                ("bookmarkHHH1", Remote)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -1708,8 +1745,7 @@ fn complex_deduping() {
         merged_deletions: 0,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -1740,9 +1776,7 @@ fn left_pane_root() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true])
-        .into_tree()
-        .unwrap();
+    let expected_tree = merged_nodes!(ROOT_GUID, Local);
     let expected_deletions = vec![
         "folderLEFTPC",
         "folderLEFTPF",
@@ -1754,8 +1788,7 @@ fn left_pane_root() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1799,13 +1832,11 @@ fn livemarks() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true]),
-        ("toolbar_____", Folder[needs_merge = true]),
-        ("unfiled_____", Folder[needs_merge = true])
-    })
-    .into_tree()
-    .unwrap();
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("menu________", LocalWithNewLocalStructure),
+        ("toolbar_____", LocalWithNewLocalStructure),
+        ("unfiled_____", RemoteWithNewRemoteStructure)
+    });
     let expected_deletions = vec![
         "livemarkAAAA",
         "livemarkBBBB",
@@ -1820,8 +1851,7 @@ fn livemarks() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1899,17 +1929,15 @@ fn non_syncable_items() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder[needs_merge = true], {
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkBBBB", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkBBBB", LocalWithNewLocalStructure)
         }),
-        ("unfiled_____", Folder[needs_merge = true], {
-            ("bookmarkJJJJ", Bookmark[needs_merge = true]),
-            ("bookmarkGGGG", Bookmark)
+        ("unfiled_____", LocalWithNewLocalStructure, {
+            ("bookmarkJJJJ", RemoteWithNewRemoteStructure),
+            ("bookmarkGGGG", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec![
         "bookmarkEEEE", // Non-syncable locally.
         "bookmarkFFFF", // Non-syncable locally.
@@ -1929,8 +1957,7 @@ fn non_syncable_items() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -1961,21 +1988,18 @@ fn applying_two_empty_folders_doesnt_smush() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder, {
-        ("mobile______", Folder, {
-            ("emptyempty01", Folder),
-            ("emptyempty02", Folder)
+    let expected_tree = merged_nodes!(ROOT_GUID, UnchangedWithNewLocalStructure, {
+        ("mobile______", Remote, {
+            ("emptyempty01", Remote),
+            ("emptyempty02", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 3,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2047,15 +2071,13 @@ fn applying_two_empty_folders_matches_only_one() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("mobile______", Folder[needs_merge = true], {
-            ("emptyempty01", Folder),
-            ("emptyempty02", Folder),
-            ("emptyempty03", Folder)
+    let expected_tree = merged_nodes!({
+        ("mobile______", LocalWithNewLocalStructure, {
+            ("emptyempty01", Remote),
+            ("emptyempty02", Remote),
+            ("emptyempty03", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -2066,8 +2088,7 @@ fn applying_two_empty_folders_matches_only_one() {
         merged_deletions: 0,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2134,13 +2155,11 @@ fn deduping_ignores_parent_title() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("mobile______", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark)
+    let expected_tree = merged_nodes!({
+        ("mobile______", LocalWithNewLocalStructure, {
+            ("bookmarkAAAA", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -2151,8 +2170,7 @@ fn deduping_ignores_parent_title() {
         merged_deletions: 0,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2186,21 +2204,18 @@ fn mismatched_compatible_bookmark_kinds() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder[needs_merge = true], {
-            ("queryAAAAAAA", Query[needs_merge = true]),
-            ("bookmarkBBBB", Query)
+    let expected_tree = merged_nodes!({
+        ("menu________", Local, {
+            ("queryAAAAAAA", Local),
+            ("bookmarkBBBB", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 3,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2303,21 +2318,19 @@ fn invalid_guids() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("toolbar_____", Folder[needs_merge = true, age = 5], {
-            ("item00000000", Bookmark[needs_merge = true, age = 5]),
-            ("item00000001", Bookmark[needs_merge = true, age = 5]),
-            ("item00000002", Bookmark[needs_merge = true, age = 5])
+    let expected_tree = merged_nodes!({
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("item00000000", RemoteWithNewRemoteStructure),
+            ("item00000001", RemoteWithNewRemoteStructure),
+            ("item00000002", LocalWithNewLocalStructure)
         }),
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark),
-            ("bookmarkBBBB", Bookmark),
-            ("item00000003", Bookmark[needs_merge = true]),
-            ("item00000004", Bookmark[needs_merge = true])
+        ("menu________", LocalWithNewLocalStructure, {
+            ("bookmarkAAAA", Remote),
+            ("bookmarkBBBB", Remote),
+            ("item00000003", LocalWithNewLocalStructure),
+            ("item00000004", LocalWithNewLocalStructure)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec!["", "!@#$%^", "loooooongGUID", "shortGUID"];
     let expected_telem = StructureCounts {
         merged_nodes: 9,
@@ -2325,8 +2338,7 @@ fn invalid_guids() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
     deletions.sort();
@@ -2370,30 +2382,27 @@ fn multiple_parents() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!(ROOT_GUID, Folder, {
-        ("toolbar_____", Folder[age = 5, needs_merge = true], {
-            ("bookmarkBBBB", Bookmark)
+    let expected_tree = merged_nodes!(ROOT_GUID, UnchangedWithNewLocalStructure, {
+        ("toolbar_____", RemoteWithNewRemoteStructure, {
+            ("bookmarkBBBB", Remote)
         }),
-        ("menu________", Folder[needs_merge = true], {
-            ("bookmarkGGGG", Bookmark),
-            ("bookmarkAAAA", Bookmark[needs_merge = true]),
-            ("folderCCCCCC", Folder[needs_merge = true], {
-                ("bookmarkDDDD", Bookmark[needs_merge = true]),
-                ("bookmarkEEEE", Bookmark),
-                ("bookmarkFFFF", Bookmark),
-                ("bookmarkHHHH", Bookmark)
+        ("menu________", RemoteWithNewRemoteStructure, {
+            ("bookmarkGGGG", Remote),
+            ("bookmarkAAAA", RemoteWithNewRemoteStructure),
+            ("folderCCCCCC", RemoteWithNewRemoteStructure, {
+                ("bookmarkDDDD", RemoteWithNewRemoteStructure),
+                ("bookmarkEEEE", Remote),
+                ("bookmarkFFFF", Remote),
+                ("bookmarkHHHH", Remote)
             })
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 10,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2455,27 +2464,24 @@ fn reparent_orphans() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("toolbar_____", Folder[needs_merge = true], {
-            ("bookmarkBBBB", Bookmark),
-            ("bookmarkAAAA", Bookmark),
-            ("bookmarkEEEE", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!({
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("bookmarkBBBB", Unchanged),
+            ("bookmarkAAAA", Unchanged),
+            ("bookmarkEEEE", RemoteWithNewRemoteStructure)
         }),
-        ("unfiled_____", Folder[needs_merge = true], {
-            ("bookmarkDDDD", Bookmark),
-            ("bookmarkCCCC", Bookmark),
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        ("unfiled_____", LocalWithNewLocalStructure, {
+            ("bookmarkDDDD", Remote),
+            ("bookmarkCCCC", Unchanged),
+            ("bookmarkFFFF", RemoteWithNewRemoteStructure)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 8,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2511,16 +2517,14 @@ fn deleted_user_content_roots() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("unfiled_____", Folder[needs_merge = true], {
-            ("bookmarkAAAA", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("unfiled_____", Local, {
+            ("bookmarkAAAA", Local)
         }),
-        ("mobile______", Folder, {
-            ("bookmarkBBBB", Bookmark)
+        ("mobile______", Remote, {
+            ("bookmarkBBBB", Remote)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         remote_revives: 0,
         local_deletes: 0,
@@ -2531,8 +2535,7 @@ fn deleted_user_content_roots() {
         merged_deletions: 1,
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     // TODO(lina): Remove invalid tombstones from both sides.
     let deletions = merger.deletions().map(|d| d.guid).collect::<Vec<_>>();
@@ -2587,35 +2590,32 @@ fn moved_user_content_roots() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("unfiled_____", Folder[needs_merge = true], {
-            ("bookmarkIIII", Bookmark),
-            ("bookmarkAAAA", Bookmark[needs_merge = true])
+    let expected_tree = merged_nodes!(ROOT_GUID, LocalWithNewLocalStructure, {
+        ("unfiled_____", LocalWithNewLocalStructure, {
+            ("bookmarkIIII", Remote),
+            ("bookmarkAAAA", Local)
         }),
-        ("mobile______", Folder[needs_merge = true], {
-            ("bookmarkFFFF", Bookmark[needs_merge = true])
+        ("mobile______", Local, {
+            ("bookmarkFFFF", Local)
         }),
-        ("menu________", Folder[needs_merge = true], {
-           ("bookmarkHHHH", Bookmark),
-           ("bookmarkBBBB", Bookmark[needs_merge = true]),
-           ("folderCCCCCC", Folder[needs_merge = true], {
-               ("bookmarkDDDD", Bookmark[needs_merge = true])
+        ("menu________", LocalWithNewLocalStructure, {
+           ("bookmarkHHHH", Remote),
+           ("bookmarkBBBB", Local),
+           ("folderCCCCCC", LocalWithNewLocalStructure, {
+               ("bookmarkDDDD", Local)
            })
         }),
-        ("toolbar_____", Folder[needs_merge = true], {
-            ("bookmarkGGGG", Bookmark),
-            ("bookmarkEEEE", Bookmark)
+        ("toolbar_____", LocalWithNewLocalStructure, {
+            ("bookmarkGGGG", Remote),
+            ("bookmarkEEEE", Unchanged)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_telem = StructureCounts {
         merged_nodes: 13,
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     assert_eq!(merger.deletions().count(), 0);
 
@@ -2709,31 +2709,29 @@ fn reupload_replace() {
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
 
-    let expected_tree = nodes!({
-        ("menu________", Folder, {
+    let expected_tree = merged_nodes!({
+        ("menu________", Unchanged, {
             // A is invalid remotely and valid locally, so replace.
-            ("bookmarkAAAA", Bookmark[needs_merge = true])
+            ("bookmarkAAAA", Local)
         }),
         // Toolbar has new children.
-        ("toolbar_____", Folder[needs_merge = true], {
+        ("toolbar_____", LocalWithNewLocalStructure, {
             // B has new children.
-            ("folderBBBBBB", Folder[needs_merge = true]),
-            ("folderDDDDDD", Folder)
+            ("folderBBBBBB", LocalWithNewLocalStructure),
+            ("folderDDDDDD", UnchangedWithNewLocalStructure)
         }),
-        ("unfiled_____", Folder, {
+        ("unfiled_____", UnchangedWithNewLocalStructure, {
             // K was flagged for reupload.
-           ("bookmarkKKKK", Bookmark[needs_merge = true])
+           ("bookmarkKKKK", RemoteWithNewRemoteStructure)
         }),
-        ("mobile______", Folder, {
+        ("mobile______", UnchangedWithNewLocalStructure, {
             // F is invalid locally, so replace with remote. This isn't
             // possible in Firefox Desktop or Rust Places, where the local
             // tree is always valid, but we handle it for symmetry.
-            ("bookmarkFFFF", Bookmark),
-            ("folderGGGGGG", Folder[needs_merge = true])
+            ("bookmarkFFFF", Remote),
+            ("folderGGGGGG", Local)
         })
-    })
-    .into_tree()
-    .unwrap();
+    });
     let expected_deletions = vec![
         // C is invalid on both sides, so we need to upload a tombstone.
         ("bookmarkCCCC", true),
@@ -2757,8 +2755,7 @@ fn reupload_replace() {
         ..StructureCounts::default()
     };
 
-    let merged_tree = merged_root.into_tree().unwrap();
-    assert_eq!(merged_tree, expected_tree);
+    assert_eq!(&expected_tree, merged_root.node());
 
     let mut deletions = merger
         .deletions()
@@ -2768,6 +2765,109 @@ fn reupload_replace() {
     assert_eq!(deletions, expected_deletions);
 
     assert_eq!(merger.counts(), &expected_telem);
+}
+
+#[test]
+fn completion_ops() {
+    let local_tree = nodes!({
+        ("menu________", Folder, {
+            ("bookmarkAAAA", Bookmark),
+            ("bookmarkBBBB", Bookmark),
+            ("bookmarkCCCC", Bookmark),
+            ("bookmarkDDDD", Bookmark)
+        }),
+        ("toolbar_____", Folder, {
+            ("bookmarkEEEE", Bookmark)
+        }),
+        ("unfiled_____", Folder),
+        ("mobile______", Folder, {
+            ("bookmarkFFFF", Bookmark[needs_merge = true, age = 10])
+        })
+    })
+    .into_tree()
+    .unwrap();
+
+    let remote_tree = nodes!({
+        ("menu________", Folder[needs_merge = true], {
+            ("bookmarkAAAA", Bookmark),
+            ("bookmarkDDDD", Bookmark),
+            ("bookmarkCCCC", Bookmark),
+            ("bookmarkBBBB", Bookmark),
+            ("bookmarkEEEE", Bookmark[needs_merge = true])
+        }),
+        ("toolbar_____", Folder[needs_merge = true], {
+            ("bookmarkGGGG", Bookmark[needs_merge = true])
+        }),
+        ("unfiled_____", Folder[needs_merge = true], {
+            ("bookmarkHHHH", Bookmark[needs_merge = true])
+        }),
+        ("mobile______", Folder, {
+            ("bookmarkFFFF", Bookmark[needs_merge = true, age = 5])
+        })
+    })
+    .into_tree()
+    .unwrap();
+
+    let mut merger = Merger::new(&local_tree, &remote_tree);
+    let merged_root = merger.merge().unwrap();
+    assert!(merger.subsumes(&local_tree));
+    assert!(merger.subsumes(&remote_tree));
+
+    let expected_tree = merged_nodes!({
+        ("menu________", UnchangedWithNewLocalStructure, {
+            ("bookmarkAAAA", Unchanged),
+            ("bookmarkDDDD", Unchanged),
+            ("bookmarkCCCC", Unchanged),
+            ("bookmarkBBBB", Unchanged),
+            ("bookmarkEEEE", Remote)
+        }),
+        ("toolbar_____", UnchangedWithNewLocalStructure, {
+            ("bookmarkGGGG", Remote)
+        }),
+        ("unfiled_____", UnchangedWithNewLocalStructure, {
+           ("bookmarkHHHH", Remote)
+        }),
+        ("mobile______", Unchanged, {
+            ("bookmarkFFFF", Remote)
+        })
+    });
+
+    assert_eq!(&expected_tree, merged_root.node());
+
+    let ops = merged_root.completion_ops();
+    assert!(ops.change_guids.is_empty());
+    assert_eq!(
+        ops.apply_remote
+            .iter()
+            .map(|op| op.to_string())
+            .collect::<Vec<String>>(),
+        &[
+            "Apply remote bookmarkEEEE",
+            "Apply remote bookmarkGGGG",
+            "Apply remote bookmarkHHHH",
+            "Apply remote bookmarkFFFF",
+        ]
+    );
+    assert_eq!(
+        ops.apply_new_local_structure
+            .iter()
+            .map(|op| op.to_string())
+            .collect::<Vec<String>>(),
+        &[
+            "Move bookmarkDDDD into menu________ at 1",
+            "Move bookmarkBBBB into menu________ at 3",
+            "Move bookmarkEEEE into menu________ at 4",
+            "Move bookmarkGGGG into toolbar_____ at 0",
+            "Move bookmarkHHHH into unfiled_____ at 0",
+        ]
+    );
+    assert_eq!(
+        ops.update_sync_change_counters
+            .iter()
+            .map(|op| op.to_string())
+            .collect::<Vec<String>>(),
+        &["Don't upload bookmarkFFFF",]
+    );
 }
 
 #[test]
