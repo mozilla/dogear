@@ -2837,7 +2837,7 @@ fn completion_ops() {
     let ops = merged_root.completion_ops();
     assert!(ops.change_guids.is_empty());
     assert_eq!(
-        ops.apply_remote
+        ops.apply_remote_items
             .iter()
             .map(|op| op.to_string())
             .collect::<Vec<String>>(),
@@ -2861,8 +2861,9 @@ fn completion_ops() {
             "Move bookmarkHHHH into unfiled_____ at 0",
         ]
     );
+    assert!(ops.upload.is_empty());
     assert_eq!(
-        ops.update_sync_change_counters
+        ops.skip_upload
             .iter()
             .map(|op| op.to_string())
             .collect::<Vec<String>>(),

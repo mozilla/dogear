@@ -1587,9 +1587,9 @@ impl<'t> MergedRoot<'t> {
     /// Returns a sequence of completion operations, or "completion ops", to
     /// apply to the local tree so that it matches the merged tree.
     pub fn completion_ops(&self) -> CompletionOps<'_> {
-        let mut actions = CompletionOps::default();
-        accumulate(&mut actions, &self.node, 1);
-        actions
+        let mut ops = CompletionOps::default();
+        accumulate(&mut ops, &self.node, 1);
+        ops
     }
 
     /// Returns an ASCII art representation of the root and its descendants,
@@ -1994,9 +1994,10 @@ pub enum Content {
 #[derive(Clone, Debug, Default)]
 pub struct CompletionOps<'t> {
     pub change_guids: Vec<ChangeGuid<'t>>,
-    pub apply_remote: Vec<ApplyRemoteItem<'t>>,
+    pub apply_remote_items: Vec<ApplyRemoteItem<'t>>,
     pub apply_new_local_structure: Vec<ApplyNewLocalStructure<'t>>,
-    pub update_sync_change_counters: Vec<UpdateSyncChangeCounter<'t>>,
+    pub skip_upload: Vec<SkipUpload<'t>>,
+    pub upload: Vec<Upload<'t>>,
 }
 
 /// A completion op to change the local GUID to the merged GUID. This is used
@@ -2088,27 +2089,35 @@ impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
 /// A completion op to flag a local item for upload, or remove its upload flag,
 /// depending on the value of `should_upload`.
 #[derive(Clone, Copy, Debug)]
-pub struct UpdateSyncChangeCounter<'t> {
+pub struct Upload<'t> {
     pub merged_node: &'t MergedNode<'t>,
-    pub should_upload: bool,
 }
 
-impl<'t> fmt::Display for UpdateSyncChangeCounter<'t> {
+impl<'t> fmt::Display for Upload<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.should_upload {
-            write!(f, "Upload {}", self.merged_node.guid)
-        } else {
-            write!(f, "Don't upload {}", self.merged_node.guid)
-        }
+        write!(f, "Upload {}", self.merged_node.guid)
+    }
+}
+
+/// A completion op to skip uploading a local item after resolving merge
+/// conflicts.
+#[derive(Clone, Copy, Debug)]
+pub struct SkipUpload<'t> {
+    pub merged_node: &'t MergedNode<'t>,
+}
+
+impl<'t> fmt::Display for SkipUpload<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Don't upload {}", self.merged_node.guid)
     }
 }
 
 /// Recursively accumulates completion ops, starting at `merged_node` and
 /// drilling down into all its descendants.
-fn accumulate<'t>(actions: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, level: usize) {
+fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, level: usize) {
     for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
         if merged_child_node.merge_state.should_apply_item() {
-            actions.apply_remote.push(ApplyRemoteItem {
+            ops.apply_remote_items.push(ApplyRemoteItem {
                 merged_node: merged_child_node,
                 level,
             });
@@ -2124,7 +2133,7 @@ fn accumulate<'t>(actions: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'
                 // Only the child changed, so the only possible op is a
                 // GUID change.
                 if merged_child_node.local_guid_changed() {
-                    actions.change_guids.push(ChangeGuid {
+                    ops.change_guids.push(ChangeGuid {
                         merged_node: merged_child_node,
                         level,
                     });
@@ -2135,19 +2144,17 @@ fn accumulate<'t>(actions: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'
                 // possible GUID change, and an op to update the local
                 // parent and position.
                 if merged_child_node.local_guid_changed() {
-                    actions.change_guids.push(ChangeGuid {
+                    ops.change_guids.push(ChangeGuid {
                         merged_node: merged_child_node,
                         level,
                     });
                 }
-                actions
-                    .apply_new_local_structure
-                    .push(ApplyNewLocalStructure {
-                        merged_node: merged_child_node,
-                        merged_parent_node: merged_node,
-                        position,
-                        level,
-                    });
+                ops.apply_new_local_structure.push(ApplyNewLocalStructure {
+                    merged_node: merged_child_node,
+                    merged_parent_node: merged_node,
+                    position,
+                    level,
+                });
             }
             (true, false) => {
                 // Only the parent changed, so we need to check if the
@@ -2164,35 +2171,33 @@ fn accumulate<'t>(actions: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'
                     .and_then(|m| merged_local_child_node.map(|n| m.guid != n.guid))
                     .unwrap_or(true)
                 {
-                    actions
-                        .apply_new_local_structure
-                        .push(ApplyNewLocalStructure {
-                            merged_node: merged_child_node,
-                            merged_parent_node: merged_node,
-                            position,
-                            level,
-                        });
+                    ops.apply_new_local_structure.push(ApplyNewLocalStructure {
+                        merged_node: merged_child_node,
+                        merged_parent_node: merged_node,
+                        position,
+                        level,
+                    });
                 }
             }
             (false, false) => {}
         }
+        // If the local item isn't flagged for upload, but should be, or is
+        // flagged when it doesn't need to be, emit ops to update its state.
         let local_needs_merge = merged_child_node
             .merge_state
             .local_node()
             .map(|node| node.needs_merge)
             .unwrap_or(false);
         let should_upload = merged_child_node.merge_state.should_upload();
-        if local_needs_merge != should_upload {
-            // The local item is either flagged for upload when it
-            // doesn't need to be, or not flagged but should be.
-            // Emit an op to update its change counter.
-            actions
-                .update_sync_change_counters
-                .push(UpdateSyncChangeCounter {
-                    merged_node: merged_child_node,
-                    should_upload,
-                });
+        match (local_needs_merge, should_upload) {
+            (false, true) => ops.upload.push(Upload {
+                merged_node: merged_child_node,
+            }),
+            (true, false) => ops.skip_upload.push(SkipUpload {
+                merged_node: merged_child_node,
+            }),
+            _ => {}
         }
-        accumulate(actions, merged_child_node, level + 1);
+        accumulate(ops, merged_child_node, level + 1);
     }
 }
