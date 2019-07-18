@@ -199,10 +199,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             }
         }
 
-        Ok(MergedRoot::with_size(
-            merged_root_node,
-            self.structure_counts.merged_nodes,
-        ))
+        Ok(MergedRoot::new(merged_root_node))
     }
 
     /// Checks if the merger merged all GUIDs in the given tree.
@@ -553,8 +550,8 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             }
             (_, _) => {
                 // The child exists on both sides, so merge it now. If the GUID
-                // changes because it's invalid, we'll need to reupload and
-                // apply the child and its parent.
+                // changes because it's invalid, we'll need to reapply the
+                // child, and reupload the child and its parent.
                 let mut merged_child_node =
                     self.two_way_merge(local_child_node, remote_child_node)?;
                 if merged_child_node.local_guid_changed() {
@@ -1141,14 +1138,15 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             }
 
             (false, false) => {
-                // The item's children differ, even though it's not flagged as
-                // unmerged, so we prefer the newer side for children.
                 let item = match (local_node.validity, remote_node.validity) {
                     (Validity::Replace, Validity::Replace) => ConflictResolution::Unchanged,
                     (_, Validity::Replace) => ConflictResolution::Local,
                     (Validity::Replace, _) => ConflictResolution::Remote,
                     (_, _) => ConflictResolution::Unchanged,
                 };
+                // If the child lists are identical, the structure is unchanged.
+                // Otherwise, the children differ even though the items aren't
+                // flagged as unmerged, so we prefer the newer side.
                 let children = if local_node.has_matching_children(remote_node) {
                     ConflictResolution::Unchanged
                 } else if local_node.age < remote_node.age {

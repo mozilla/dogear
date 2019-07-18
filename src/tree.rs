@@ -1566,36 +1566,32 @@ impl fmt::Display for Validity {
 
 /// The root of a merged tree, from which all merged nodes descend.
 #[derive(Debug)]
-pub struct MergedRoot<'t> {
-    node: MergedNode<'t>,
-    size_hint: usize,
-}
+pub struct MergedRoot<'t>(MergedNode<'t>);
 
 impl<'t> MergedRoot<'t> {
-    /// Returns a merged root for the given node. `size_hint` indicates the
-    /// size of the tree, excluding the root, and is used to avoid extra
-    /// allocations for the descendants.
-    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot<'_> {
-        MergedRoot { node, size_hint }
+    /// Returns a merged root for the given node.
+    pub(crate) fn new(node: MergedNode<'t>) -> MergedRoot<'t> {
+        MergedRoot(node)
     }
 
     /// Returns the root node.
+    #[inline]
     pub fn node(&self) -> &MergedNode<'_> {
-        &self.node
+        &self.0
     }
 
     /// Returns a sequence of completion operations, or "completion ops", to
     /// apply to the local tree so that it matches the merged tree.
     pub fn completion_ops(&self) -> CompletionOps<'_> {
         let mut ops = CompletionOps::default();
-        accumulate(&mut ops, &self.node, 1);
+        accumulate(&mut ops, self.node(), 1);
         ops
     }
 
     /// Returns an ASCII art representation of the root and its descendants,
     /// similar to `Node::to_ascii_string`.
     pub fn to_ascii_string(&self) -> String {
-        self.node.to_ascii_fragment("")
+        self.node().to_ascii_fragment("")
     }
 }
 
@@ -1662,7 +1658,7 @@ impl<'t> fmt::Display for MergedNode<'t> {
     }
 }
 
-/// The merge state indicates which node we should prefer, local or remote, when
+/// The merge state indicates which side we should prefer, local or remote, when
 /// resolving conflicts.
 #[derive(Clone, Copy, Debug)]
 pub enum MergeState<'t> {
@@ -1670,16 +1666,16 @@ pub enum MergeState<'t> {
     /// be uploaded.
     LocalOnly(Node<'t>),
 
-    /// Local-only with a merged structure means the item should be uploaded,
-    /// _and_ has a new structure that should be applied.
+    /// Local-only with a new local structure means the item should be uploaded,
+    /// _and_ has new children (reparented or repositioned) locally.
     LocalOnlyWithNewLocalStructure(Node<'t>),
 
     /// A remote-only merge state means the item only exists remotely, and
     /// should be applied.
     RemoteOnly(Node<'t>),
 
-    /// Remote-only with a merged structure means the item should be applied,
-    /// _and_ has a new structure that should be reuploaded.
+    /// Remote-only with a new remote structure means the item should be
+    /// applied, _and_ has a new child list that should be uploaded.
     RemoteOnlyWithNewRemoteStructure(Node<'t>),
 
     /// A local merge state means the item exists on both sides, and has newer
@@ -1689,8 +1685,8 @@ pub enum MergeState<'t> {
         remote_node: Node<'t>,
     },
 
-    /// Local with a merged structure means the item has newer local changes
-    /// that should be uploaded, and a new structure that should be applied.
+    /// Local with a new local structure means the item has newer local changes
+    /// that should be uploaded, and new children locally.
     LocalWithNewLocalStructure {
         local_node: Node<'t>,
         remote_node: Node<'t>,
@@ -1703,22 +1699,24 @@ pub enum MergeState<'t> {
         remote_node: Node<'t>,
     },
 
-    /// Remote with a merged structure means the item has newer remote changes
-    /// that should be applied, and a new structure that should be reuploaded.
+    /// Remote with a new remote structure means the item has newer remote
+    /// changes that should be applied, and a new child list that should be
+    /// uploaded.
     RemoteWithNewRemoteStructure {
         local_node: Node<'t>,
         remote_node: Node<'t>,
     },
 
-    /// An unchanged merge state means the item didn't change on either side,
-    /// and doesn't need to be uploaded or applied.
+    /// An unchanged merge state means the item and its children are the
+    /// same on both sides, and don't need to be uploaded or applied.
     Unchanged {
         local_node: Node<'t>,
         remote_node: Node<'t>,
     },
 
-    /// Unchanged with a merged structure means the item hasn't changed, but
-    /// its structure has, and should be applied.
+    /// Unchanged with a new local structure means the item hasn't changed, but
+    /// its children have. The new children should be applied locally, but not
+    /// uploaded.
     UnchangedWithNewLocalStructure {
         local_node: Node<'t>,
         remote_node: Node<'t>,
@@ -2086,8 +2084,7 @@ impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
     }
 }
 
-/// A completion op to flag a local item for upload, or remove its upload flag,
-/// depending on the value of `should_upload`.
+/// A completion op to flag a local item for upload.
 #[derive(Clone, Copy, Debug)]
 pub struct Upload<'t> {
     pub merged_node: &'t MergedNode<'t>,
