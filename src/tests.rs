@@ -428,7 +428,7 @@ fn unchanged_newer_changed_older() {
     .into_tree()
     .unwrap();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         // Even though the local menu is newer (local = 5s, remote = 9s;
         // adding E updated the modified times of A and the menu), it's
         // not *changed* locally, so we should merge remote children first.
@@ -441,12 +441,12 @@ fn unchanged_newer_changed_older() {
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkDDDD", Bookmark[age = 5])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("folderCCCCCC".into());
+    local_tree_builder.deletion("folderCCCCCC".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
             ("bookmarkBBBB", Bookmark[age = 5])
         }),
@@ -458,10 +458,10 @@ fn unchanged_newer_changed_older() {
             }),
             ("bookmarkDDDD", Bookmark[age = 5])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("folderAAAAAA".into());
+    remote_tree_builder.deletion("folderAAAAAA".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -880,7 +880,7 @@ fn complex_orphaning() {
     .unwrap();
 
     // Locally: delete E, add B > F.
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("toolbar_____", Folder[needs_merge = false], {
             ("folderAAAAAA", Folder, {
                 ("folderBBBBBB", Folder[needs_merge = true], {
@@ -893,13 +893,13 @@ fn complex_orphaning() {
                 ("folderDDDDDD", Folder[needs_merge = true])
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("folderEEEEEE".into());
+    local_tree_builder.deletion("folderEEEEEE".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
     // Remotely: delete B, add E > G.
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("toolbar_____", Folder, {
             ("folderAAAAAA", Folder[needs_merge = true])
         }),
@@ -912,10 +912,10 @@ fn complex_orphaning() {
                 })
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("folderBBBBBB".into());
+    remote_tree_builder.deletion("folderBBBBBB".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -980,7 +980,7 @@ fn locally_modified_remotely_deleted() {
     .into_tree()
     .unwrap();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("toolbar_____", Folder, {
             ("folderAAAAAA", Folder, {
                 ("folderBBBBBB", Folder[needs_merge = true], {
@@ -993,12 +993,12 @@ fn locally_modified_remotely_deleted() {
                 ("folderDDDDDD", Folder[needs_merge = true])
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("folderEEEEEE".into());
+    local_tree_builder.deletion("folderEEEEEE".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("toolbar_____", Folder, {
             ("folderAAAAAA", Folder[needs_merge = true])
         }),
@@ -1011,10 +1011,10 @@ fn locally_modified_remotely_deleted() {
                 })
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("folderBBBBBB".into());
+    remote_tree_builder.deletion("folderBBBBBB".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1073,18 +1073,15 @@ fn locally_deleted_remotely_modified() {
     .into_tree()
     .unwrap();
 
-    let mut local_tree = nodes!({ ("menu________", Folder[needs_merge = true]) })
-        .into_tree()
-        .unwrap();
-    for guid in &[
-        "bookmarkAAAA",
-        "folderBBBBBB",
-        "bookmarkCCCC",
-        "folderDDDDDD",
-        "bookmarkEEEE",
-    ] {
-        local_tree.note_deleted(guid.to_owned().into());
-    }
+    let mut local_tree_builder =
+        Builder::try_from(nodes!({ ("menu________", Folder[needs_merge = true]) })).unwrap();
+    local_tree_builder
+        .deletion("bookmarkAAAA".into())
+        .deletion("folderBBBBBB".into())
+        .deletion("bookmarkCCCC".into())
+        .deletion("folderDDDDDD".into())
+        .deletion("bookmarkEEEE".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
     let remote_tree = nodes!({
         ("menu________", Folder, {
@@ -1143,17 +1140,15 @@ fn locally_deleted_remotely_modified() {
 fn nonexistent_on_one_side() {
     before_each();
 
-    let mut local_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
-        .into_tree()
-        .unwrap();
     // A doesn't exist remotely.
-    local_tree.note_deleted("bookmarkAAAA".into());
+    let mut local_tree_builder = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder));
+    local_tree_builder.deletion("bookmarkAAAA".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder))
-        .into_tree()
-        .unwrap();
     // B doesn't exist locally.
-    remote_tree.note_deleted("bookmarkBBBB".into());
+    let mut remote_tree_builder = Tree::with_root(Item::new(ROOT_GUID, Kind::Folder));
+    remote_tree_builder.deletion("bookmarkBBBB".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1197,7 +1192,7 @@ fn clear_folder_then_delete() {
     .into_tree()
     .unwrap();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("folderAAAAAA", Folder, {
                 ("bookmarkBBBB", Bookmark),
@@ -1208,12 +1203,12 @@ fn clear_folder_then_delete() {
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkFFFF", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("folderDDDDDD".into());
+    local_tree_builder.deletion("folderDDDDDD".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkBBBB", Bookmark[needs_merge = true]),
             ("folderDDDDDD", Folder, {
@@ -1224,10 +1219,10 @@ fn clear_folder_then_delete() {
         ("unfiled_____", Folder[needs_merge = true], {
             ("bookmarkCCCC", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("folderAAAAAA".into());
+    remote_tree_builder.deletion("folderAAAAAA".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -1279,7 +1274,7 @@ fn newer_move_to_deleted() {
     .into_tree()
     .unwrap();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             // A is younger locally. However, we should *not* revert
             // remotely moving B to the toolbar. (Locally, B exists in A,
@@ -1292,12 +1287,12 @@ fn newer_move_to_deleted() {
         ("toolbar_____", Folder[needs_merge = true], {
             ("bookmarkDDDD", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("folderCCCCCC".into());
+    local_tree_builder.deletion("folderCCCCCC".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
             // C is younger remotely. However, we should *not* revert
             // locally moving D to the toolbar. (Locally, D exists in C,
@@ -1310,10 +1305,10 @@ fn newer_move_to_deleted() {
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
             ("bookmarkBBBB", Bookmark[needs_merge = true, age = 5])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("folderAAAAAA".into());
+    remote_tree_builder.deletion("folderAAAAAA".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -2441,25 +2436,27 @@ fn reparent_orphans() {
 fn deleted_user_content_roots() {
     before_each();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("unfiled_____", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("mobile______".into());
-    local_tree.note_deleted("toolbar_____".into());
+    local_tree_builder
+        .deletion("mobile______".into())
+        .deletion("toolbar_____".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkBBBB", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("unfiled_____".into());
-    remote_tree.note_deleted("toolbar_____".into());
+    remote_tree_builder
+        .deletion("unfiled_____".into())
+        .deletion("toolbar_____".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
@@ -2605,7 +2602,7 @@ fn cycle() {
 fn reupload_replace() {
     before_each();
 
-    let mut local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder, {
             ("bookmarkAAAA", Bookmark)
         }),
@@ -2623,12 +2620,12 @@ fn reupload_replace() {
             ("folderGGGGGG", Folder),
             ("bookmarkHHHH", Bookmark[validity = Validity::Replace])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    local_tree.note_deleted("bookmarkIIII".into());
+    local_tree_builder.deletion("bookmarkIIII".into());
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let mut remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder, {
             ("bookmarkAAAA", Bookmark[validity = Validity::Replace])
         }),
@@ -2648,10 +2645,10 @@ fn reupload_replace() {
                 ("bookmarkIIII", Bookmark[validity = Validity::Replace])
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    remote_tree.note_deleted("bookmarkEEEE".into());
+    remote_tree_builder.deletion("bookmarkEEEE".into());
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
     let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();

@@ -58,6 +58,7 @@ impl Tree {
                 parent: BuilderEntryParent::Root,
                 children: Vec::new(),
             }],
+            deleted_guids: HashSet::new(),
             entry_index_by_guid,
             reparent_orphans_to: None,
         }
@@ -87,12 +88,6 @@ impl Tree {
     #[inline]
     pub fn is_deleted(&self, guid: &Guid) -> bool {
         self.deleted_guids.contains(guid)
-    }
-
-    /// Notes a tombstone for a deleted item.
-    #[inline]
-    pub fn note_deleted(&mut self, guid: Guid) {
-        self.deleted_guids.insert(guid);
     }
 
     /// Returns an iterator for all node and tombstone GUIDs.
@@ -235,6 +230,7 @@ impl fmt::Display for Tree {
 pub struct Builder {
     entry_index_by_guid: HashMap<Guid, Index>,
     entries: Vec<BuilderEntry>,
+    deleted_guids: HashSet<Guid>,
     reparent_orphans_to: Option<Guid>,
 }
 
@@ -275,6 +271,14 @@ impl Builder {
             None => BuilderEntryChild::Missing(child_guid.clone()),
         };
         ParentBuilder(self, entry_child)
+    }
+
+    /// Notes a tombstone for a deleted item, marking it as deleted in the
+    /// tree.
+    #[inline]
+    pub fn deletion(&mut self, guid: Guid) -> &mut Builder {
+        self.deleted_guids.insert(guid);
+        self
     }
 
     /// Equivalent to using our implementation of`TryInto<Tree>::try_into`, but
@@ -429,7 +433,7 @@ impl TryFrom<Builder> for Tree {
         Ok(Tree {
             entry_index_by_guid: builder.entry_index_by_guid,
             entries,
-            deleted_guids: HashSet::new(),
+            deleted_guids: builder.deleted_guids,
             problems,
         })
     }
