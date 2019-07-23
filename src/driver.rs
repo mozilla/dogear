@@ -58,9 +58,7 @@ impl AbortSignal for DefaultAbortSignal {
 /// A merge telemetry event.
 pub enum TelemetryEvent {
     FetchLocalTree(TreeStats),
-    FetchNewLocalContents(ContentsStats),
     FetchRemoteTree(TreeStats),
-    FetchNewRemoteContents(ContentsStats),
     Merge(Duration, StructureCounts),
     Apply(Duration),
 }
@@ -71,12 +69,6 @@ pub struct TreeStats {
     pub time: Duration,
     pub items: usize,
     pub problems: ProblemCounts,
-}
-
-/// Records the number of and time taken to fetch local or remote contents.
-pub struct ContentsStats {
-    pub time: Duration,
-    pub items: usize,
 }
 
 /// A merge driver provides methods to customize merging behavior.

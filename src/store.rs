@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, time::Duration, time::Instant};
+use std::{time::Duration, time::Instant};
 
 use crate::driver::{
-    AbortSignal, ContentsStats, DefaultAbortSignal, DefaultDriver, Driver, TelemetryEvent,
-    TreeStats,
+    AbortSignal, DefaultAbortSignal, DefaultDriver, Driver, TelemetryEvent, TreeStats,
 };
 use crate::error::{Error, ErrorKind};
-use crate::guid::Guid;
 use crate::merge::{Deletion, Merger};
-use crate::tree::{Content, MergedRoot, Tree};
+use crate::tree::{MergedRoot, Tree};
 
 /// A store is the main interface to Dogear. It implements methods for building
 /// local and remote trees from a storage backend, fetching content info for
@@ -31,19 +29,9 @@ pub trait Store<E: From<Error>> {
     /// the local store.
     fn fetch_local_tree(&self) -> Result<Tree, E>;
 
-    /// Fetches content info for all new local items that haven't been uploaded
-    /// or merged yet. We'll try to dedupe them to remotely changed items with
-    /// similar contents and different GUIDs.
-    fn fetch_new_local_contents(&self) -> Result<HashMap<Guid, Content>, E>;
-
     /// Builds a fully rooted, consistent tree from the items and tombstones in
     /// the mirror.
     fn fetch_remote_tree(&self) -> Result<Tree, E>;
-
-    /// Fetches content info for all items in the mirror that changed since the
-    /// last sync and don't exist locally. We'll try to match new local items to
-    /// these.
-    fn fetch_new_remote_contents(&self) -> Result<HashMap<Guid, Content>, E>;
 
     /// Applies the merged root to the local store, and stages items for
     /// upload. On Desktop, this method inserts the merged tree into a temp
@@ -78,13 +66,6 @@ pub trait Store<E: From<Error>> {
         debug!(driver, "Built local tree from mirror\n{}", local_tree);
 
         signal.err_if_aborted()?;
-        let (new_local_contents, time) = with_timing(|| self.fetch_new_local_contents())?;
-        driver.record_telemetry_event(TelemetryEvent::FetchNewLocalContents(ContentsStats {
-            items: new_local_contents.len(),
-            time,
-        }));
-
-        signal.err_if_aborted()?;
         let (remote_tree, time) = with_timing(|| self.fetch_remote_tree())?;
         driver.record_telemetry_event(TelemetryEvent::FetchRemoteTree(TreeStats {
             items: remote_tree.size(),
@@ -93,21 +74,7 @@ pub trait Store<E: From<Error>> {
         }));
         debug!(driver, "Built remote tree from mirror\n{}", remote_tree);
 
-        signal.err_if_aborted()?;
-        let (new_remote_contents, time) = with_timing(|| self.fetch_new_remote_contents())?;
-        driver.record_telemetry_event(TelemetryEvent::FetchNewRemoteContents(ContentsStats {
-            items: new_local_contents.len(),
-            time,
-        }));
-
-        let mut merger = Merger::with_driver(
-            driver,
-            signal,
-            &local_tree,
-            &new_local_contents,
-            &remote_tree,
-            &new_remote_contents,
-        );
+        let mut merger = Merger::with_driver(driver, signal, &local_tree, &remote_tree);
         let (merged_root, time) = with_timing(|| merger.merge())?;
         driver.record_telemetry_event(TelemetryEvent::Merge(time, *merger.counts()));
         debug!(

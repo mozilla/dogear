@@ -14,7 +14,6 @@
 
 use std::{
     cell::Cell,
-    collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Once,
 };
@@ -55,13 +54,13 @@ impl TryFrom<Node> for Builder {
     fn try_from(node: Node) -> Result<Builder> {
         fn inflate(b: &mut Builder, parent_guid: &Guid, node: Node) -> Result<()> {
             let guid = node.item.guid.clone();
-            b.item(node.item)
-                .map(|_| ())
-                .or_else(|err| match err.kind() {
-                    ErrorKind::DuplicateItem(_) => Ok(()),
-                    _ => Err(err),
-                })?;
-            b.parent_for(&guid).by_structure(&parent_guid)?;
+            if let Err(err) = b.item(node.item) {
+                match err.kind() {
+                    ErrorKind::DuplicateItem(_) => {}
+                    _ => return Err(err),
+                }
+            }
+            b.mutate(&guid).by_structure(&parent_guid)?;
             for child in node.children {
                 inflate(b, &guid, child)?;
             }
@@ -1355,69 +1354,57 @@ fn newer_move_to_deleted() {
 fn deduping_local_newer() {
     before_each();
 
-    let local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("bookmarkAAA1", Bookmark[needs_merge = true]),
             ("bookmarkAAA2", Bookmark[needs_merge = true]),
             ("bookmarkAAA3", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert(
-        "bookmarkAAA1".into(),
-        Content::Bookmark {
+    local_tree_builder
+        .mutate(&"bookmarkAAA1".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
-    new_local_contents.insert(
-        "bookmarkAAA2".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"bookmarkAAA2".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
-    new_local_contents.insert(
-        "bookmarkAAA3".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"bookmarkAAA3".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
+        });
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
             ("bookmarkAAAA", Bookmark[needs_merge = true, age = 5]),
             ("bookmarkAAA4", Bookmark[needs_merge = true, age = 5]),
             ("bookmarkAAA5", Bookmark)
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert(
-        "bookmarkAAAA".into(),
-        Content::Bookmark {
+    remote_tree_builder
+        .mutate(&"bookmarkAAAA".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "bookmarkAAA4".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"bookmarkAAA4".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
+        });
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
-    let mut merger = Merger::with_contents(
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1451,7 +1438,7 @@ fn deduping_local_newer() {
 fn deduping_remote_newer() {
     before_each();
 
-    let local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true, age = 5], {
             // Shouldn't dedupe to `folderAAAAA1` because it's not in
             // `new_local_contents`.
@@ -1479,43 +1466,44 @@ fn deduping_remote_newer() {
             // Should dedupe to `queryIIIIII1`.
             ("queryIIIIIII", Query[needs_merge = true, age = 5])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert(
-        "bookmarkCCCC".into(),
-        Content::Bookmark {
+    local_tree_builder
+        .mutate(&"bookmarkCCCC".into())
+        .content(Content::Bookmark {
             title: "C".into(),
             url_href: "http://example.com/c".into(),
-        },
-    );
-    new_local_contents.insert("folderDDDDDD".into(), Content::Folder { title: "D".into() });
-    new_local_contents.insert(
-        "bookmarkEEEE".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"folderDDDDDD".into())
+        .content(Content::Folder { title: "D".into() });
+    local_tree_builder
+        .mutate(&"bookmarkEEEE".into())
+        .content(Content::Bookmark {
             title: "E".into(),
             url_href: "http://example.com/e".into(),
-        },
-    );
-    new_local_contents.insert("separatorFFF".into(), Content::Separator { position: 1 });
-    new_local_contents.insert("separatorGGG".into(), Content::Separator { position: 2 });
-    new_local_contents.insert(
-        "bookmarkHHHH".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"separatorFFF".into())
+        .content(Content::Separator { position: 1 });
+    local_tree_builder
+        .mutate(&"separatorGGG".into())
+        .content(Content::Separator { position: 2 });
+    local_tree_builder
+        .mutate(&"bookmarkHHHH".into())
+        .content(Content::Bookmark {
             title: "H".into(),
             url_href: "http://example.com/h".into(),
-        },
-    );
-    new_local_contents.insert(
-        "queryIIIIIII".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"queryIIIIIII".into())
+        .content(Content::Bookmark {
             title: "I".into(),
             url_href: "place:maxResults=10&sort=8".into(),
-        },
-    );
+        });
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("folderAAAAAA", Folder[needs_merge = true], {
                 ("bookmarkBBBB", Bookmark[age = 10]),
@@ -1529,48 +1517,44 @@ fn deduping_remote_newer() {
             ("bookmarkHHH1", Bookmark[needs_merge = true]),
             ("queryIIIIII1", Query[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert(
-        "bookmarkCCC1".into(),
-        Content::Bookmark {
+    remote_tree_builder
+        .mutate(&"bookmarkCCC1".into())
+        .content(Content::Bookmark {
             title: "C".into(),
             url_href: "http://example.com/c1".into(),
-        },
-    );
-    new_remote_contents.insert("folderDDDDD1".into(), Content::Folder { title: "D".into() });
-    new_remote_contents.insert(
-        "bookmarkEEE1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"folderDDDDD1".into())
+        .content(Content::Folder { title: "D".into() });
+    remote_tree_builder
+        .mutate(&"bookmarkEEE1".into())
+        .content(Content::Bookmark {
             title: "E".into(),
             url_href: "http://example.com/e".into(),
-        },
-    );
-    new_remote_contents.insert("separatorFF1".into(), Content::Separator { position: 1 });
-    new_remote_contents.insert("separatorGG1".into(), Content::Separator { position: 2 });
-    new_remote_contents.insert(
-        "bookmarkHHH1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"separatorFF1".into())
+        .content(Content::Separator { position: 1 });
+    remote_tree_builder
+        .mutate(&"separatorGG1".into())
+        .content(Content::Separator { position: 2 });
+    remote_tree_builder
+        .mutate(&"bookmarkHHH1".into())
+        .content(Content::Bookmark {
             title: "H".into(),
             url_href: "http://example.com/h".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "queryIIIIII1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"queryIIIIII1".into())
+        .content(Content::Bookmark {
             title: "I".into(),
             url_href: "place:maxResults=10&sort=8".into(),
-        },
-    );
+        });
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
-    let mut merger = Merger::with_contents(
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -1612,7 +1596,7 @@ fn deduping_remote_newer() {
 fn complex_deduping() {
     before_each();
 
-    let local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("folderAAAAAA", Folder[needs_merge = true, age = 10], {
                 ("bookmarkBBBB", Bookmark[needs_merge = true, age = 10]),
@@ -1625,43 +1609,44 @@ fn complex_deduping() {
                 ("bookmarkGGGG", Bookmark[needs_merge = true, age = 5])
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert("folderAAAAAA".into(), Content::Folder { title: "A".into() });
-    new_local_contents.insert(
-        "bookmarkBBBB".into(),
-        Content::Bookmark {
+    local_tree_builder
+        .mutate(&"folderAAAAAA".into())
+        .content(Content::Folder { title: "A".into() });
+    local_tree_builder
+        .mutate(&"bookmarkBBBB".into())
+        .content(Content::Bookmark {
             title: "B".into(),
             url_href: "http://example.com/b".into(),
-        },
-    );
-    new_local_contents.insert(
-        "bookmarkCCCC".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"bookmarkCCCC".into())
+        .content(Content::Bookmark {
             title: "C".into(),
             url_href: "http://example.com/c".into(),
-        },
-    );
-    new_local_contents.insert("folderDDDDDD".into(), Content::Folder { title: "D".into() });
-    new_local_contents.insert(
-        "bookmarkEEEE".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"folderDDDDDD".into())
+        .content(Content::Folder { title: "D".into() });
+    local_tree_builder
+        .mutate(&"bookmarkEEEE".into())
+        .content(Content::Bookmark {
             title: "E".into(),
             url_href: "http://example.com/e".into(),
-        },
-    );
-    new_local_contents.insert("folderFFFFFF".into(), Content::Folder { title: "F".into() });
-    new_local_contents.insert(
-        "bookmarkGGGG".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"folderFFFFFF".into())
+        .content(Content::Folder { title: "F".into() });
+    local_tree_builder
+        .mutate(&"bookmarkGGGG".into())
+        .content(Content::Bookmark {
             title: "G".into(),
             url_href: "http://example.com/g".into(),
-        },
-    );
+        });
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("menu________", Folder[needs_merge = true], {
             ("folderAAAAA1", Folder[needs_merge = true], {
                 ("bookmarkBBB1", Bookmark[needs_merge = true])
@@ -1674,48 +1659,44 @@ fn complex_deduping() {
                 ("bookmarkHHH1", Bookmark[needs_merge = true])
             })
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert("folderAAAAA1".into(), Content::Folder { title: "A".into() });
-    new_remote_contents.insert(
-        "bookmarkBBB1".into(),
-        Content::Bookmark {
+    remote_tree_builder
+        .mutate(&"folderAAAAA1".into())
+        .content(Content::Folder { title: "A".into() });
+    remote_tree_builder
+        .mutate(&"bookmarkBBB1".into())
+        .content(Content::Bookmark {
             title: "B".into(),
             url_href: "http://example.com/b".into(),
-        },
-    );
-    new_remote_contents.insert("folderDDDDD1".into(), Content::Folder { title: "D".into() });
-    new_remote_contents.insert(
-        "bookmarkEEE1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"folderDDDDD1".into())
+        .content(Content::Folder { title: "D".into() });
+    remote_tree_builder
+        .mutate(&"bookmarkEEE1".into())
+        .content(Content::Bookmark {
             title: "E".into(),
             url_href: "http://example.com/e".into(),
-        },
-    );
-    new_remote_contents.insert("folderFFFFF1".into(), Content::Folder { title: "F".into() });
-    new_remote_contents.insert(
-        "bookmarkGGG1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"folderFFFFF1".into())
+        .content(Content::Folder { title: "F".into() });
+    remote_tree_builder
+        .mutate(&"bookmarkGGG1".into())
+        .content(Content::Bookmark {
             title: "G".into(),
             url_href: "http://example.com/g".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "bookmarkHHH1".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"bookmarkHHH1".into())
+        .content(Content::Bookmark {
             title: "H".into(),
             url_href: "http://example.com/h".into(),
-        },
-    );
+        });
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
-    let mut merger = Merger::with_contents(
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -2010,63 +1991,51 @@ fn applying_two_empty_folders_doesnt_smush() {
 fn applying_two_empty_folders_matches_only_one() {
     before_each();
 
-    let local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("emptyempty02", Folder[needs_merge = true]),
             ("emptyemptyL0", Folder[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert(
-        "emptyempty02".into(),
-        Content::Folder {
+    local_tree_builder
+        .mutate(&"emptyempty02".into())
+        .content(Content::Folder {
             title: "Empty".into(),
-        },
-    );
-    new_local_contents.insert(
-        "emptyemptyL0".into(),
-        Content::Folder {
+        });
+    local_tree_builder
+        .mutate(&"emptyemptyL0".into())
+        .content(Content::Folder {
             title: "Empty".into(),
-        },
-    );
+        });
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("emptyempty01", Folder[needs_merge = true]),
             ("emptyempty02", Folder[needs_merge = true]),
             ("emptyempty03", Folder[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert(
-        "emptyempty01".into(),
-        Content::Folder {
+    remote_tree_builder
+        .mutate(&"emptyempty01".into())
+        .content(Content::Folder {
             title: "Empty".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "emptyempty02".into(),
-        Content::Folder {
+        });
+    remote_tree_builder
+        .mutate(&"emptyempty02".into())
+        .content(Content::Folder {
             title: "Empty".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "emptyempty03".into(),
-        Content::Folder {
+        });
+    remote_tree_builder
+        .mutate(&"emptyempty03".into())
+        .content(Content::Folder {
             title: "Empty".into(),
-        },
-    );
+        });
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
-    let mut merger = Merger::with_contents(
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -2101,56 +2070,45 @@ fn applying_two_empty_folders_matches_only_one() {
 fn deduping_ignores_parent_title() {
     before_each();
 
-    let local_tree = nodes!({
+    let mut local_tree_builder = Builder::try_from(nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAA1", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_local_contents: HashMap<Guid, Content> = HashMap::new();
-    new_local_contents.insert(
-        "mobile______".into(),
-        Content::Folder {
+    local_tree_builder
+        .mutate(&"mobile______".into())
+        .content(Content::Folder {
             title: "Favoritos do celular".into(),
-        },
-    );
-    new_local_contents.insert(
-        "bookmarkAAA1".into(),
-        Content::Bookmark {
+        });
+    local_tree_builder
+        .mutate(&"bookmarkAAA1".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
+        });
+    let local_tree = local_tree_builder.into_tree().unwrap();
 
-    let remote_tree = nodes!({
+    let mut remote_tree_builder = Builder::try_from(nodes!({
         ("mobile______", Folder[needs_merge = true], {
             ("bookmarkAAAA", Bookmark[needs_merge = true])
         })
-    })
-    .into_tree()
+    }))
     .unwrap();
-    let mut new_remote_contents: HashMap<Guid, Content> = HashMap::new();
-    new_remote_contents.insert(
-        "mobile______".into(),
-        Content::Folder {
+    remote_tree_builder
+        .mutate(&"mobile______".into())
+        .content(Content::Folder {
             title: "Mobile Bookmarks".into(),
-        },
-    );
-    new_remote_contents.insert(
-        "bookmarkAAAA".into(),
-        Content::Bookmark {
+        });
+    remote_tree_builder
+        .mutate(&"bookmarkAAAA".into())
+        .content(Content::Bookmark {
             title: "A".into(),
             url_href: "http://example.com/a".into(),
-        },
-    );
+        });
+    let remote_tree = remote_tree_builder.into_tree().unwrap();
 
-    let mut merger = Merger::with_contents(
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::new(&local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));
@@ -2287,7 +2245,6 @@ fn invalid_guids() {
     })
     .into_tree()
     .unwrap();
-    let new_local_contents: HashMap<Guid, Content> = HashMap::new();
 
     let remote_tree = nodes!({
         ("toolbar_____", Folder[needs_merge = true, age = 5], {
@@ -2303,17 +2260,9 @@ fn invalid_guids() {
     })
     .into_tree()
     .unwrap();
-    let new_remote_contents: HashMap<Guid, Content> = HashMap::new();
 
     let driver = GenerateNewGuid::default();
-    let mut merger = Merger::with_driver(
-        &driver,
-        &DefaultAbortSignal,
-        &local_tree,
-        &new_local_contents,
-        &remote_tree,
-        &new_remote_contents,
-    );
+    let mut merger = Merger::with_driver(&driver, &DefaultAbortSignal, &local_tree, &remote_tree);
     let merged_root = merger.merge().unwrap();
     assert!(merger.subsumes(&local_tree));
     assert!(merger.subsumes(&remote_tree));

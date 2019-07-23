@@ -100,9 +100,7 @@ pub struct Merger<'t, D = DefaultDriver, A = DefaultAbortSignal> {
     driver: &'t D,
     signal: &'t A,
     local_tree: &'t Tree,
-    new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
-    new_remote_contents: Option<&'t HashMap<Guid, Content>>,
     matching_dupes_by_local_parent_guid: HashMap<Guid, MatchingDupes<'t>>,
     merged_guids: HashSet<Guid>,
     delete_locally: HashSet<Guid>,
@@ -110,7 +108,6 @@ pub struct Merger<'t, D = DefaultDriver, A = DefaultAbortSignal> {
     structure_counts: StructureCounts,
 }
 
-#[cfg(test)]
 impl<'t> Merger<'t, DefaultDriver, DefaultAbortSignal> {
     /// Creates a merger with the default merge driver.
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
@@ -118,32 +115,13 @@ impl<'t> Merger<'t, DefaultDriver, DefaultAbortSignal> {
             driver: &DefaultDriver,
             signal: &DefaultAbortSignal,
             local_tree,
-            new_local_contents: None,
             remote_tree,
-            new_remote_contents: None,
             matching_dupes_by_local_parent_guid: HashMap::new(),
             merged_guids: HashSet::new(),
             delete_locally: HashSet::new(),
             delete_remotely: HashSet::new(),
             structure_counts: StructureCounts::default(),
         }
-    }
-
-    /// Creates a merger with the default merge driver and contents.
-    pub fn with_contents(
-        local_tree: &'t Tree,
-        new_local_contents: &'t HashMap<Guid, Content>,
-        remote_tree: &'t Tree,
-        new_remote_contents: &'t HashMap<Guid, Content>,
-    ) -> Merger<'t> {
-        Merger::with_driver(
-            &DefaultDriver,
-            &DefaultAbortSignal,
-            local_tree,
-            new_local_contents,
-            remote_tree,
-            new_remote_contents,
-        )
     }
 }
 
@@ -153,17 +131,13 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         driver: &'t D,
         signal: &'t A,
         local_tree: &'t Tree,
-        new_local_contents: &'t HashMap<Guid, Content>,
         remote_tree: &'t Tree,
-        new_remote_contents: &'t HashMap<Guid, Content>,
     ) -> Merger<'t, D, A> {
         Merger {
             driver,
             signal,
             local_tree,
-            new_local_contents: Some(new_local_contents),
             remote_tree,
-            new_remote_contents: Some(new_remote_contents),
             matching_dupes_by_local_parent_guid: HashMap::new(),
             merged_guids: HashSet::new(),
             delete_locally: HashSet::new(),
@@ -1571,10 +1545,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             if local_child_node.is_user_content_root() {
                 continue;
             }
-            if let Some(local_child_content) = self
-                .new_local_contents
-                .and_then(|contents| contents.get(&local_child_node.guid))
-            {
+            if let Some(local_child_content) = local_child_node.content() {
                 if let Some(remote_child_node) =
                     self.remote_tree.node_for_guid(&local_child_node.guid)
                 {
@@ -1626,10 +1597,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             // Note that we don't need to check if the remote node is deleted
             // locally, because it wouldn't have local content entries if it
             // were.
-            if let Some(remote_child_content) = self
-                .new_remote_contents
-                .and_then(|contents| contents.get(&remote_child_node.guid))
-            {
+            if let Some(remote_child_content) = remote_child_node.content() {
                 if let Some(local_nodes_for_key) =
                     dupe_key_to_local_nodes.get_mut(remote_child_content)
                 {
