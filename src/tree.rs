@@ -306,8 +306,14 @@ impl TryFrom<Builder> for Tree {
     /// Builds a tree from all stored items and parent-child associations,
     /// resolving inconsistencies like orphans, multiple parents, and
     /// parent-child disagreements.
-    fn try_from(builder: Builder) -> Result<Tree> {
+    fn try_from(mut builder: Builder) -> Result<Tree> {
         let mut problems = Problems::default();
+
+        // The indices in this bit vector point to zombie entries, which exist
+        // in the tree, but are also flagged as deleted. We'll remove these
+        // zombies from the set of deleted GUIDs, and mark them as diverged for
+        // reupload.
+        let mut zombies = SmallBitVec::from_elem(builder.entries.len(), false);
 
         // First, resolve parents for all entries, and build a lookup table for
         // items without a position.
@@ -316,16 +322,19 @@ impl TryFrom<Builder> for Tree {
         for (entry_index, entry) in builder.entries.iter().enumerate() {
             let r = ResolveParent::new(&builder, entry, &mut problems);
             let resolved_parent = r.resolve();
-            if let ResolvedParent::ByParentGuid(parent_index) = &resolved_parent {
+            if let ResolvedParent::ByParentGuid(parent_index) = resolved_parent {
                 // Reparented items are special: since they aren't mentioned in
                 // that parent's `children`, we don't know their positions. Note
                 // them for when we resolve children. We also clone the GUID,
                 // since we use it for sorting, but can't access it by
                 // reference once we call `builder.entries.into_iter()` below.
                 let reparented_child_indices = reparented_child_indices_by_parent
-                    .entry(*parent_index)
+                    .entry(parent_index)
                     .or_default();
                 reparented_child_indices.push(entry_index);
+            }
+            if builder.deleted_guids.remove(&entry.item.guid) {
+                zombies.set(entry_index, true);
             }
             parents.push(resolved_parent);
         }
@@ -361,52 +370,69 @@ impl TryFrom<Builder> for Tree {
                 }
             };
 
+            // If the entry is a zombie, mark it as diverged, so that the merger
+            // can remove the tombstone and reupload the item.
+            if zombies[entry_index] {
+                divergence = Divergence::Diverged;
+            }
+
             // Check if the entry's children exist and agree that this entry is
             // their parent.
             let mut child_indices = Vec::with_capacity(entry.children.len());
             for child in entry.children {
                 match child {
-                    BuilderEntryChild::Exists(child_index) => match &parents[child_index] {
-                        ResolvedParent::Root => {
-                            // The Places root can't be a child of another entry.
-                            unreachable!("A child can't be a top-level root");
-                        }
-                        ResolvedParent::ByStructure(parent_index) => {
-                            // If the child has a valid parent by structure, it
-                            // must be the entry. If it's not, there's a bug
-                            // in `ResolveParent` or `BuilderEntry`.
-                            assert_eq!(*parent_index, entry_index);
-                            child_indices.push(child_index);
-                        }
-                        ResolvedParent::ByChildren(parent_index) => {
-                            // If the child has multiple parents, we may have
-                            // resolved a different one, so check if we decided
-                            // to keep the child in this entry.
+                    BuilderEntryChild::Exists(child_index) => {
+                        if zombies[entry_index] {
+                            // If the entry has a zombie child, mark it as
+                            // diverged.
                             divergence = Divergence::Diverged;
-                            if *parent_index == entry_index {
+                        }
+                        match &parents[child_index] {
+                            ResolvedParent::Root => {
+                                // The Places root can't be a child of another entry.
+                                unreachable!("A child can't be a top-level root");
+                            }
+                            ResolvedParent::ByStructure(parent_index) => {
+                                // If the child has a valid parent by structure, it
+                                // must be the entry. If it's not, there's a bug
+                                // in `ResolveParent` or `BuilderEntry`.
+                                assert_eq!(*parent_index, entry_index);
                                 child_indices.push(child_index);
                             }
+                            ResolvedParent::ByChildren(parent_index) => {
+                                // If the child has multiple parents, we may have
+                                // resolved a different one, so check if we decided
+                                // to keep the child in this entry.
+                                divergence = Divergence::Diverged;
+                                if *parent_index == entry_index {
+                                    child_indices.push(child_index);
+                                }
+                            }
+                            ResolvedParent::ByParentGuid(parent_index) => {
+                                // We should only ever prefer parents
+                                // `by_parent_guid` over parents `by_children` for
+                                // misparented user content roots. Otherwise,
+                                // there's a bug in `ResolveParent`.
+                                assert_eq!(*parent_index, 0);
+                                divergence = Divergence::Diverged;
+                            }
                         }
-                        ResolvedParent::ByParentGuid(parent_index) => {
-                            // We should only ever prefer parents
-                            // `by_parent_guid` over parents `by_children` for
-                            // misparented user content roots. Otherwise,
-                            // there's a bug in `ResolveParent`.
-                            assert_eq!(*parent_index, 0);
-                            divergence = Divergence::Diverged;
-                        }
-                    },
+                    }
                     BuilderEntryChild::Missing(child_guid) => {
-                        // If the entry's `children` mentions a GUID for which
-                        // we don't have an entry, note it as a problem, and
-                        // ignore the child.
+                        // If the entry's `children` mention a deleted or
+                        // nonexistent GUID, note it as a problem, and ignore
+                        // the child.
                         divergence = Divergence::Diverged;
-                        problems.note(
-                            &entry.item.guid,
+                        let problem = if builder.deleted_guids.remove(&child_guid) {
+                            Problem::DeletedChild {
+                                child_guid: child_guid.clone(),
+                            }
+                        } else {
                             Problem::MissingChild {
                                 child_guid: child_guid.clone(),
-                            },
-                        );
+                            }
+                        };
+                        problems.note(&entry.item.guid, problem);
                     }
                 }
             }
@@ -911,7 +937,12 @@ impl<'a> PossibleParent<'a> {
             BuilderParentBy::UnknownItem(guid) => {
                 match self.builder.entry_index_by_guid.get(guid) {
                     Some(index) => &self.builder.entries[*index],
-                    None => return DivergedParentGuid::Missing(guid.clone()).into(),
+                    None => {
+                        if self.builder.deleted_guids.contains(guid) {
+                            return DivergedParentGuid::Deleted(guid.clone()).into();
+                        }
+                        return DivergedParentGuid::Missing(guid.clone()).into();
+                    }
                 }
             }
         };
@@ -1074,9 +1105,11 @@ pub enum Problem {
     /// `DivergedParent::ByChildren`, the item has a parent-child disagreement.
     DivergedParents(Vec<DivergedParent>),
 
-    /// The item is mentioned in a folder's `children`, but doesn't exist or is
-    /// deleted.
+    /// The item is mentioned in a folder's `children`, but doesn't exist.
     MissingChild { child_guid: Guid },
+
+    /// The item is mentioned in a folder's `children`, but is deleted.
+    DeletedChild { child_guid: Guid },
 }
 
 impl Problem {
@@ -1086,6 +1119,12 @@ impl Problem {
             Problem::Orphan => {
                 return ProblemCounts {
                     orphans: 1,
+                    ..ProblemCounts::default()
+                }
+            }
+            Problem::DeletedChild { .. } => {
+                return ProblemCounts {
+                    deleted_children: 1,
                     ..ProblemCounts::default()
                 }
             }
@@ -1146,6 +1185,16 @@ impl Problem {
                         }
                     }
                 }
+                DivergedParentGuid::Deleted(_) => {
+                    if deltas.deleted_parent_guids > 0 {
+                        deltas
+                    } else {
+                        ProblemCounts {
+                            deleted_parent_guids: 1,
+                            ..deltas
+                        }
+                    }
+                }
                 DivergedParentGuid::Missing(_) => {
                     if deltas.missing_parent_guids > 0 {
                         deltas
@@ -1187,6 +1236,9 @@ impl fmt::Display for DivergedParent {
                 DivergedParentGuid::NonFolder(parent_guid) => {
                     write!(f, "has non-folder parent {}", parent_guid)
                 }
+                DivergedParentGuid::Deleted(parent_guid) => {
+                    write!(f, "has deleted parent {}", parent_guid)
+                }
                 DivergedParentGuid::Missing(parent_guid) => {
                     write!(f, "has nonexistent parent {}", parent_guid)
                 }
@@ -1202,6 +1254,8 @@ pub enum DivergedParentGuid {
     Folder(Guid),
     /// Exists, but isn't a folder.
     NonFolder(Guid),
+    /// Is explicitly deleted.
+    Deleted(Guid),
     /// Doesn't exist at all.
     Missing(Guid),
 }
@@ -1283,6 +1337,9 @@ impl<'a> fmt::Display for ProblemSummary<'a> {
             Problem::MissingChild { child_guid } => {
                 return write!(f, "{} has nonexistent child {}", self.guid(), child_guid);
             }
+            Problem::DeletedChild { child_guid } => {
+                return write!(f, "{} has deleted child {}", self.guid(), child_guid);
+            }
         };
         match parents.as_slice() {
             [a] => write!(f, "{}", a)?,
@@ -1315,6 +1372,8 @@ pub struct ProblemCounts {
     pub misparented_roots: usize,
     /// Number of items with multiple, conflicting parents `by_children`.
     pub multiple_parents_by_children: usize,
+    /// Number of items whose `parentid` is deleted.
+    pub deleted_parent_guids: usize,
     /// Number of items whose `parentid` doesn't exist.
     pub missing_parent_guids: usize,
     /// Number of items whose `parentid` isn't a folder.
@@ -1322,6 +1381,8 @@ pub struct ProblemCounts {
     /// Number of items whose `parentid`s disagree with their parents'
     /// `children`.
     pub parent_child_disagreements: usize,
+    /// Number of deleted items mentioned in all parents' `children`.
+    pub deleted_children: usize,
     /// Number of nonexistent items mentioned in all parents' `children`.
     pub missing_children: usize,
 }
@@ -1334,10 +1395,12 @@ impl ProblemCounts {
             misparented_roots: self.misparented_roots + other.misparented_roots,
             multiple_parents_by_children: self.multiple_parents_by_children
                 + other.multiple_parents_by_children,
+            deleted_parent_guids: self.deleted_parent_guids + other.deleted_parent_guids,
             missing_parent_guids: self.missing_parent_guids + other.missing_parent_guids,
             non_folder_parent_guids: self.non_folder_parent_guids + other.non_folder_parent_guids,
             parent_child_disagreements: self.parent_child_disagreements
                 + other.parent_child_disagreements,
+            deleted_children: self.deleted_children + other.deleted_children,
             missing_children: self.missing_children + other.missing_children,
         }
     }

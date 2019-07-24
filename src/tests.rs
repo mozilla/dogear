@@ -2862,6 +2862,12 @@ fn problems() {
             Problem::MissingChild {
                 child_guid: "bookmarkOOOO".into(),
             },
+        )
+        .note(
+            &"bookmarkPPPP".into(),
+            Problem::DivergedParents(vec![
+                DivergedParentGuid::Deleted("folderQQQQQQ".into()).into()
+            ]),
         );
 
     let mut summary = problems.summarize().collect::<Vec<_>>();
@@ -2878,6 +2884,7 @@ fn problems() {
             "bookmarkHHHH is in children of folderIIIIII, is in children of folderJJJJJJ, and has \
              nonexistent parent folderKKKKKK",
             "bookmarkLLLL has diverged parents",
+            "bookmarkPPPP has deleted parent folderQQQQQQ",
             "folderMMMMMM has nonexistent child bookmarkNNNN",
             "folderMMMMMM has nonexistent child bookmarkOOOO",
             "menu________ is a user content root, but is in children of unfiled_____",
@@ -2891,9 +2898,11 @@ fn problems() {
             orphans: 1,
             misparented_roots: 2,
             multiple_parents_by_children: 3,
+            deleted_parent_guids: 1,
             missing_parent_guids: 1,
             non_folder_parent_guids: 1,
-            parent_child_disagreements: 6,
+            parent_child_disagreements: 7,
+            deleted_children: 0,
             missing_children: 2,
         }
     );
