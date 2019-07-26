@@ -17,9 +17,9 @@ use std::{time::Duration, time::Instant};
 use crate::driver::{
     AbortSignal, DefaultAbortSignal, DefaultDriver, Driver, TelemetryEvent, TreeStats,
 };
-use crate::error::{Error, ErrorKind};
-use crate::merge::{Deletion, Merger};
-use crate::tree::{MergedRoot, Tree};
+use crate::error::Error;
+use crate::merge::{MergedRoot, Merger};
+use crate::tree::Tree;
 
 /// A store is the main interface to Dogear. It implements methods for building
 /// local and remote trees from a storage backend, fetching content info for
@@ -37,11 +37,7 @@ pub trait Store<E: From<Error>> {
     /// upload. On Desktop, this method inserts the merged tree into a temp
     /// table, updates Places, and inserts outgoing items into another
     /// temp table.
-    fn apply<'t>(
-        &mut self,
-        root: MergedRoot<'t>,
-        deletions: impl Iterator<Item = Deletion<'t>>,
-    ) -> Result<(), E>;
+    fn apply<'t>(&mut self, root: MergedRoot<'t>) -> Result<(), E>;
 
     /// Builds and applies a merged tree using the default merge driver.
     fn merge(&mut self) -> Result<(), E> {
@@ -74,40 +70,26 @@ pub trait Store<E: From<Error>> {
         }));
         debug!(driver, "Built remote tree from mirror\n{}", remote_tree);
 
-        let mut merger = Merger::with_driver(driver, signal, &local_tree, &remote_tree);
+        let merger = Merger::with_driver(driver, signal, &local_tree, &remote_tree);
         let (merged_root, time) = with_timing(|| merger.merge())?;
-        driver.record_telemetry_event(TelemetryEvent::Merge(time, *merger.counts()));
+        driver.record_telemetry_event(TelemetryEvent::Merge(time, *merged_root.counts()));
         debug!(
             driver,
             "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
-            merged_root.to_ascii_string(),
-            merger
+            merged_root.node().to_ascii_string(),
+            merged_root
                 .local_deletions()
                 .map(|d| d.guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
-            merger
+            merged_root
                 .remote_deletions()
                 .map(|d| d.guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
 
-        // The merged tree should know about all items mentioned in the local
-        // and remote trees. Otherwise, it's incomplete, and we can't apply it.
-        // This indicates a bug in the merger.
-
-        signal.err_if_aborted()?;
-        if !merger.subsumes(&local_tree) {
-            Err(E::from(ErrorKind::UnmergedLocalItems.into()))?;
-        }
-
-        signal.err_if_aborted()?;
-        if !merger.subsumes(&remote_tree) {
-            Err(E::from(ErrorKind::UnmergedRemoteItems.into()))?;
-        }
-
-        let ((), time) = with_timing(|| self.apply(merged_root, merger.deletions()))?;
+        let ((), time) = with_timing(|| self.apply(merged_root))?;
         driver.record_telemetry_event(TelemetryEvent::Apply(time));
 
         Ok(())

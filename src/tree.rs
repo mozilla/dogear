@@ -90,9 +90,15 @@ impl Tree {
         self.deleted_guids.contains(guid)
     }
 
+    /// Indicates if the GUID is mentioned in the tree, either as a node or
+    /// a deletion.
+    #[inline]
+    pub fn mentions(&self, guid: &Guid) -> bool {
+        self.entry_index_by_guid.contains_key(guid) || self.deleted_guids.contains(guid)
+    }
+
     /// Returns an iterator for all node and tombstone GUIDs.
     pub fn guids(&self) -> impl Iterator<Item = &Guid> {
-        assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entries
             .iter()
             .map(|entry| &entry.item.guid)
@@ -102,7 +108,6 @@ impl Tree {
     /// Returns the node for a given `guid`, or `None` if a node with the `guid`
     /// doesn't exist in the tree, or was deleted.
     pub fn node_for_guid(&self, guid: &Guid) -> Option<Node<'_>> {
-        assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entry_index_by_guid
             .get(guid)
             .map(|&index| Node(self, &self.entries[index]))
@@ -1672,37 +1677,6 @@ impl fmt::Display for Validity {
     }
 }
 
-/// The root of a merged tree, from which all merged nodes descend.
-#[derive(Debug)]
-pub struct MergedRoot<'t>(MergedNode<'t>);
-
-impl<'t> MergedRoot<'t> {
-    /// Returns a merged root for the given node.
-    pub(crate) fn new(node: MergedNode<'t>) -> MergedRoot<'t> {
-        MergedRoot(node)
-    }
-
-    /// Returns the root node.
-    #[inline]
-    pub fn node(&self) -> &MergedNode<'_> {
-        &self.0
-    }
-
-    /// Returns a sequence of completion operations, or "completion ops", to
-    /// apply to the local tree so that it matches the merged tree.
-    pub fn completion_ops(&self) -> CompletionOps<'_> {
-        let mut ops = CompletionOps::default();
-        accumulate(&mut ops, self.node(), 1);
-        ops
-    }
-
-    /// Returns an ASCII art representation of the root and its descendants,
-    /// similar to `Node::to_ascii_string`.
-    pub fn to_ascii_string(&self) -> String {
-        self.node().to_ascii_fragment("")
-    }
-}
-
 /// A merged bookmark node that indicates which side to prefer, and holds merged
 /// child nodes.
 #[derive(Debug)]
@@ -1738,6 +1712,13 @@ impl<'t> MergedNode<'t> {
         self.merge_state
             .remote_node()
             .map_or(false, |remote_node| remote_node.guid != self.guid)
+    }
+
+    /// Returns an ASCII art representation of the root and its descendants,
+    /// similar to `Node::to_ascii_string`.
+    #[inline]
+    pub fn to_ascii_string(&self) -> String {
+        self.to_ascii_fragment("")
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
@@ -2091,218 +2072,4 @@ pub enum Content {
     Bookmark { title: String, url_href: String },
     Folder { title: String },
     Separator { position: i64 },
-}
-
-/// Completion operations to apply to the local tree after a merge. These are
-/// represented as separate structs in `Vec`s instead of enums yielded from an
-/// iterator so that consumers can easily chunk them. Places writes these ops
-/// into temp tables, then runs SQL triggers to apply them.
-#[derive(Clone, Debug, Default)]
-pub struct CompletionOps<'t> {
-    pub change_guids: Vec<ChangeGuid<'t>>,
-    pub apply_remote_items: Vec<ApplyRemoteItem<'t>>,
-    pub apply_new_local_structure: Vec<ApplyNewLocalStructure<'t>>,
-    pub skip_upload: Vec<SkipUpload<'t>>,
-    pub upload: Vec<Upload<'t>>,
-}
-
-/// A completion op to change the local GUID to the merged GUID. This is used
-/// to dedupe new local items to remote ones, as well as to fix up invalid
-/// GUIDs.
-#[derive(Clone, Copy, Debug)]
-pub struct ChangeGuid<'t> {
-    /// The merged node to update.
-    pub merged_node: &'t MergedNode<'t>,
-    /// The level of the node in the merged tree. Desktop uses this to ensure
-    /// that GUID change observers are notified in level order (parents before
-    /// children).
-    pub level: usize,
-}
-
-impl<'t> ChangeGuid<'t> {
-    #[inline]
-    pub fn local_node(&self) -> &Node<'t> {
-        self.merged_node
-            .merge_state
-            .local_node()
-            .expect("Can't change local GUID without local node")
-    }
-}
-
-impl<'t> fmt::Display for ChangeGuid<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Change {} to {}",
-            self.local_node().guid,
-            self.merged_node.guid
-        )
-    }
-}
-
-/// A completion op to insert a new remote item into the local tree, or apply
-/// synced changes to an existing item.
-#[derive(Clone, Copy, Debug)]
-pub struct ApplyRemoteItem<'t> {
-    pub merged_node: &'t MergedNode<'t>,
-    pub level: usize,
-}
-
-impl<'t> ApplyRemoteItem<'t> {
-    #[inline]
-    pub fn remote_node(&self) -> &Node<'t> {
-        self.merged_node
-            .merge_state
-            .remote_node()
-            .expect("Can't apply remote item without remote node")
-    }
-}
-
-impl<'t> fmt::Display for ApplyRemoteItem<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.merged_node.remote_guid_changed() {
-            write!(
-                f,
-                "Apply remote {} as {}",
-                self.remote_node().guid,
-                self.merged_node.guid
-            )
-        } else {
-            write!(f, "Apply remote {}", self.merged_node.guid)
-        }
-    }
-}
-
-/// A completion op to update the parent and position of a local item.
-#[derive(Clone, Copy, Debug)]
-pub struct ApplyNewLocalStructure<'t> {
-    pub merged_node: &'t MergedNode<'t>,
-    pub merged_parent_node: &'t MergedNode<'t>,
-    pub position: usize,
-    pub level: usize,
-}
-
-impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Move {} into {} at {}",
-            self.merged_node.guid, self.merged_parent_node.guid, self.position
-        )
-    }
-}
-
-/// A completion op to flag a local item for upload.
-#[derive(Clone, Copy, Debug)]
-pub struct Upload<'t> {
-    pub merged_node: &'t MergedNode<'t>,
-}
-
-impl<'t> fmt::Display for Upload<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Upload {}", self.merged_node.guid)
-    }
-}
-
-/// A completion op to skip uploading a local item after resolving merge
-/// conflicts.
-#[derive(Clone, Copy, Debug)]
-pub struct SkipUpload<'t> {
-    pub merged_node: &'t MergedNode<'t>,
-}
-
-impl<'t> fmt::Display for SkipUpload<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Don't upload {}", self.merged_node.guid)
-    }
-}
-
-/// Recursively accumulates completion ops, starting at `merged_node` and
-/// drilling down into all its descendants.
-fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, level: usize) {
-    for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
-        if merged_child_node.merge_state.should_apply_item() {
-            ops.apply_remote_items.push(ApplyRemoteItem {
-                merged_node: merged_child_node,
-                level,
-            });
-        }
-        // Places stores the parent and position on children, not
-        // parents, so we emit different completion ops depending on the
-        // merge states of the parent and child.
-        match (
-            merged_node.merge_state.should_apply_structure(),
-            merged_child_node.merge_state.should_apply_structure(),
-        ) {
-            (false, true) => {
-                // Only the child changed, so the only possible op is a
-                // GUID change.
-                if merged_child_node.local_guid_changed() {
-                    ops.change_guids.push(ChangeGuid {
-                        merged_node: merged_child_node,
-                        level,
-                    });
-                }
-            }
-            (true, true) => {
-                // Both the parent and child changed, so we emit a
-                // possible GUID change, and an op to update the local
-                // parent and position.
-                if merged_child_node.local_guid_changed() {
-                    ops.change_guids.push(ChangeGuid {
-                        merged_node: merged_child_node,
-                        level,
-                    });
-                }
-                ops.apply_new_local_structure.push(ApplyNewLocalStructure {
-                    merged_node: merged_child_node,
-                    merged_parent_node: merged_node,
-                    position,
-                    level,
-                });
-            }
-            (true, false) => {
-                // Only the parent changed, so we need to check if the
-                // child was repositioned. As an optimization, we only
-                // emit ops for items that actually moved. For example,
-                // if the local children are (A B C D) and the merged
-                // children are (A D C B), only (B D) need to move.
-                let local_child_node = merged_node
-                    .merge_state
-                    .local_node()
-                    .and_then(|local_parent_node| local_parent_node.child(position));
-                let merged_local_child_node = merged_child_node.merge_state.local_node();
-                if local_child_node
-                    .and_then(|m| merged_local_child_node.map(|n| m.guid != n.guid))
-                    .unwrap_or(true)
-                {
-                    ops.apply_new_local_structure.push(ApplyNewLocalStructure {
-                        merged_node: merged_child_node,
-                        merged_parent_node: merged_node,
-                        position,
-                        level,
-                    });
-                }
-            }
-            (false, false) => {}
-        }
-        // If the local item isn't flagged for upload, but should be, or is
-        // flagged when it doesn't need to be, emit ops to update its state.
-        let local_needs_merge = merged_child_node
-            .merge_state
-            .local_node()
-            .map(|node| node.needs_merge)
-            .unwrap_or(false);
-        let should_upload = merged_child_node.merge_state.should_upload();
-        match (local_needs_merge, should_upload) {
-            (false, true) => ops.upload.push(Upload {
-                merged_node: merged_child_node,
-            }),
-            (true, false) => ops.skip_upload.push(SkipUpload {
-                merged_node: merged_child_node,
-            }),
-            _ => {}
-        }
-        accumulate(ops, merged_child_node, level + 1);
-    }
 }
