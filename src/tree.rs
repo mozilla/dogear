@@ -738,7 +738,7 @@ impl<'a> ResolveParent<'a> {
     }
 
     fn resolve(self) -> ResolvedParent {
-        if self.entry.item.guid.is_user_content_root() {
+        if self.entry.item.guid.is_built_in_root() {
             self.user_content_root()
         } else {
             self.item()
@@ -1473,8 +1473,10 @@ impl<'t> Node<'t> {
 
     /// Indicates if this node is for a syncable item.
     ///
-    /// Syncable items descend from the four user content roots. Any
-    /// other roots and their descendants, like the left pane root,
+    /// Syncable items descend from the four user content roots. For historical
+    /// reasons, the Desktop tags root and its descendants are also marked as
+    /// syncable, even though they are not part of the synced tree structure.
+    /// Any other roots and their descendants, like the left pane root,
     /// left pane queries, and custom roots, are non-syncable.
     ///
     /// Newer Desktops should never reupload non-syncable items
@@ -1489,7 +1491,7 @@ impl<'t> Node<'t> {
         if self.is_root() {
             return false;
         }
-        if self.is_user_content_root() {
+        if self.is_built_in_root() {
             return true;
         }
         match self.kind {
@@ -1559,10 +1561,11 @@ impl<'t> Node<'t> {
         ptr::eq(self.1, &self.0.entries[0])
     }
 
-    /// Indicates if this node is a user content root.
+    /// Indicates if this node is a Places built-in root. Any other roots except
+    /// these are non-syncable.
     #[inline]
-    pub fn is_user_content_root(&self) -> bool {
-        self.1.item.guid.is_user_content_root()
+    pub fn is_built_in_root(&self) -> bool {
+        self.1.item.guid.is_built_in_root()
     }
 }
 

@@ -1009,7 +1009,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         match (local_node.needs_merge, remote_node.needs_merge) {
             (true, true) => {
                 // The item changed locally and remotely.
-                let item = if local_node.is_user_content_root() {
+                let item = if local_node.is_built_in_root() {
                     // For roots, we always prefer the local side for item
                     // changes, like the title (bug 1432614).
                     ConflictResolution::Local
@@ -1071,7 +1071,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
 
             (false, true) => {
                 // The item changed remotely, but not locally.
-                let item = if local_node.is_user_content_root() {
+                let item = if local_node.is_built_in_root() {
                     // For roots, we ignore remote item changes.
                     ConflictResolution::Unchanged
                 } else {
@@ -1122,7 +1122,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         remote_parent_node: Node<'t>,
         remote_child_node: Node<'t>,
     ) -> ConflictResolution {
-        if remote_child_node.is_user_content_root() {
+        if remote_child_node.is_built_in_root() {
             // Always use the local parent and position for roots.
             return ConflictResolution::Local;
         }
@@ -1217,7 +1217,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             return self.delete_remote_node(merged_node, remote_node);
         }
 
-        if remote_node.is_user_content_root() {
+        if remote_node.is_built_in_root() {
             // If the remote node is a content root, don't delete it locally.
             return Ok(StructureChange::Unchanged);
         }
@@ -1330,7 +1330,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             return self.delete_local_node(merged_node, local_node);
         }
 
-        if local_node.is_user_content_root() {
+        if local_node.is_built_in_root() {
             // If the local node is a content root, don't delete it remotely.
             return Ok(StructureChange::Unchanged);
         }
@@ -1523,7 +1523,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
 
         for (local_position, local_child_node) in local_parent_node.children().enumerate() {
             self.signal.err_if_aborted()?;
-            if local_child_node.is_user_content_root() {
+            if local_child_node.is_built_in_root() {
                 continue;
             }
             if let Some(local_child_content) = local_child_node.content() {
