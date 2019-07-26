@@ -1991,73 +1991,35 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
             };
             ops.apply_remote_items.push(apply_remote_item);
         }
-        // Places stores the parent and position on children, not
-        // parents, so we emit different completion ops depending on the
-        // merge states of the parent and child.
-        match (
-            merged_node.merge_state.should_apply_structure(),
-            merged_child_node.merge_state.should_apply_structure(),
-        ) {
-            (false, true) => {
-                // Only the child changed, so the only possible op is a
-                // GUID change.
-                if merged_child_node.local_guid_changed() {
-                    let change_guid = ChangeGuid {
-                        merged_node: merged_child_node,
-                        level,
-                    };
-                    ops.change_guids.push(change_guid);
-                }
-            }
-            (true, true) => {
-                // Both the parent and child changed, so we emit a
-                // possible GUID change, and an op to update the local
-                // parent and position.
-                if merged_child_node.local_guid_changed() {
-                    let change_guid = ChangeGuid {
-                        merged_node: merged_child_node,
-                        level,
-                    };
-                    ops.change_guids.push(change_guid);
-                }
-                let apply_new_local_structure = ApplyNewLocalStructure {
-                    merged_node: merged_child_node,
-                    merged_parent_node: merged_node,
-                    position,
-                    level,
-                };
-                ops.apply_new_local_structure
-                    .push(apply_new_local_structure);
-            }
-            (true, false) => {
-                // Only the parent changed, so we need to check if the
-                // child was repositioned. As an optimization, we only
-                // emit ops for items that actually moved. For example,
-                // if the local children are (A B C D) and the merged
-                // children are (A D C B), only (B D) need to move.
-                let local_child_node = merged_node
-                    .merge_state
-                    .local_node()
-                    .and_then(|local_parent_node| local_parent_node.child(position));
-                let merged_local_child_node = merged_child_node.merge_state.local_node();
-                if local_child_node
-                    .and_then(|m| merged_local_child_node.map(|n| m.guid != n.guid))
-                    .unwrap_or(true)
-                {
-                    let apply_new_local_structure = ApplyNewLocalStructure {
-                        merged_node: merged_child_node,
-                        merged_parent_node: merged_node,
-                        position,
-                        level,
-                    };
-                    ops.apply_new_local_structure
-                        .push(apply_new_local_structure);
-                }
-            }
-            (false, false) => {}
+        if merged_child_node.local_guid_changed() {
+            let change_guid = ChangeGuid {
+                merged_node: merged_child_node,
+                level,
+            };
+            ops.change_guids.push(change_guid);
         }
-        // If the local item isn't flagged for upload, but should be, or is
-        // flagged when it doesn't need to be, emit an op to update its state.
+        let local_child_node = merged_node
+            .merge_state
+            .local_node()
+            .and_then(|local_parent_node| local_parent_node.child(position));
+        let merged_local_child_node = merged_child_node.merge_state.local_node();
+        if local_child_node
+            .and_then(|m| merged_local_child_node.map(|n| m.guid != n.guid))
+            .unwrap_or(true)
+        {
+            // As an optimization, we only emit ops to apply a new local
+            // structure for items that actually moved. For example, if the
+            // local children are (A B C D) and the merged children are
+            // (A D C B), only (B D) need new structure.
+            let apply_new_local_structure = ApplyNewLocalStructure {
+                merged_node: merged_child_node,
+                merged_parent_node: merged_node,
+                position,
+                level,
+            };
+            ops.apply_new_local_structure
+                .push(apply_new_local_structure);
+        }
         let local_needs_merge = merged_child_node
             .merge_state
             .local_node()
@@ -2066,12 +2028,14 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
         let should_upload = merged_child_node.merge_state.should_upload();
         match (local_needs_merge, should_upload) {
             (false, true) => {
+                // Local item isn't flagged for upload, but should be.
                 let upload = Upload {
                     merged_node: merged_child_node,
                 };
                 ops.upload.push(upload);
             }
             (true, false) => {
+                // Local item flagged for upload when it doesn't need to be.
                 let skip_upload = SkipUpload {
                     merged_node: merged_child_node,
                 };
@@ -2079,12 +2043,12 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
             }
             _ => {}
         }
-        // If the remote item was merged, and doesn't need to be reuploaded,
-        // emit an op to flag it as merged in the remote tree. Note that we
-        // don't emit this for locally revived items, or items with new remote
-        // structure.
         if let Some(remote_child_node) = merged_child_node.merge_state.remote_node() {
             if remote_child_node.needs_merge && !should_upload {
+                // If the remote item was merged, and doesn't need to be
+                // reuploaded, flag it as merged in the remote tree. Note that
+                // we _don't_ emit this for locally revived items, or items with
+                // new remote structure.
                 let flag_as_merged = FlagAsMerged(&remote_child_node.guid);
                 ops.flag_as_merged.push(flag_as_merged);
             }
