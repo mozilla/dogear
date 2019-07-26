@@ -2071,5 +2071,5 @@ impl<'t> fmt::Display for MergeState<'t> {
 pub enum Content {
     Bookmark { title: String, url_href: String },
     Folder { title: String },
-    Separator { position: i64 },
+    Separator,
 }

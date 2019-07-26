@@ -1450,10 +1450,10 @@ fn deduping_remote_newer() {
         });
     local_tree_builder
         .mutate(&"separatorFFF".into())
-        .content(Content::Separator { position: 1 });
+        .content(Content::Separator);
     local_tree_builder
         .mutate(&"separatorGGG".into())
-        .content(Content::Separator { position: 2 });
+        .content(Content::Separator);
     local_tree_builder
         .mutate(&"bookmarkHHHH".into())
         .content(Content::Bookmark {
@@ -1501,10 +1501,10 @@ fn deduping_remote_newer() {
         });
     remote_tree_builder
         .mutate(&"separatorFF1".into())
-        .content(Content::Separator { position: 1 });
+        .content(Content::Separator);
     remote_tree_builder
         .mutate(&"separatorGG1".into())
-        .content(Content::Separator { position: 2 });
+        .content(Content::Separator);
     remote_tree_builder
         .mutate(&"bookmarkHHH1".into())
         .content(Content::Bookmark {

@@ -74,6 +74,16 @@ enum ConflictResolution {
     Unchanged,
 }
 
+/// A hash key used to match dupes by content.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum DupeKey<'a> {
+    /// Matches a dupe by content only. Used for bookmarks, queries, folders,
+    /// and livemarks.
+    WithoutPosition(&'a Content),
+    /// Matches a dupe by content and position. Used for separators.
+    WithPosition(&'a Content, usize),
+}
+
 /// A two-way merger that produces a complete merged tree from a complete local
 /// tree and a complete remote tree with changes since the last sync.
 ///
@@ -1509,9 +1519,9 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         local_parent_node: Node<'t>,
         remote_parent_node: Node<'t>,
     ) -> Result<MatchingDupes<'t>> {
-        let mut dupe_key_to_local_nodes: HashMap<&Content, VecDeque<_>> = HashMap::new();
+        let mut dupe_key_to_local_nodes: HashMap<DupeKey<'_>, VecDeque<_>> = HashMap::new();
 
-        for local_child_node in local_parent_node.children() {
+        for (local_position, local_child_node) in local_parent_node.children().enumerate() {
             self.signal.err_if_aborted()?;
             if local_child_node.is_user_content_root() {
                 continue;
@@ -1539,9 +1549,15 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 // Store matching local children in an array, in case multiple children
                 // have the same dupe key (for example, a toolbar containing multiple
                 // empty folders, as in bug 1213369).
-                let local_nodes_for_key = dupe_key_to_local_nodes
-                    .entry(local_child_content)
-                    .or_default();
+                let dupe_key = match local_child_content {
+                    Content::Bookmark { .. } | Content::Folder { .. } => {
+                        DupeKey::WithoutPosition(local_child_content)
+                    }
+                    Content::Separator => {
+                        DupeKey::WithPosition(local_child_content, local_position)
+                    }
+                };
+                let local_nodes_for_key = dupe_key_to_local_nodes.entry(dupe_key).or_default();
                 local_nodes_for_key.push_back(local_child_node);
             } else {
                 trace!(
@@ -1555,7 +1571,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         let mut local_to_remote = HashMap::new();
         let mut remote_to_local = HashMap::new();
 
-        for remote_child_node in remote_parent_node.children() {
+        for (remote_position, remote_child_node) in remote_parent_node.children().enumerate() {
             self.signal.err_if_aborted()?;
             if remote_to_local.contains_key(&remote_child_node.guid) {
                 trace!(
@@ -1569,9 +1585,15 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             // locally, because it wouldn't have local content entries if it
             // were.
             if let Some(remote_child_content) = remote_child_node.content() {
-                if let Some(local_nodes_for_key) =
-                    dupe_key_to_local_nodes.get_mut(remote_child_content)
-                {
+                let dupe_key = match remote_child_content {
+                    Content::Bookmark { .. } | Content::Folder { .. } => {
+                        DupeKey::WithoutPosition(remote_child_content)
+                    }
+                    Content::Separator => {
+                        DupeKey::WithPosition(remote_child_content, remote_position)
+                    }
+                };
+                if let Some(local_nodes_for_key) = dupe_key_to_local_nodes.get_mut(&dupe_key) {
                     if let Some(local_child_node) = local_nodes_for_key.pop_front() {
                         trace!(
                             self.driver,
