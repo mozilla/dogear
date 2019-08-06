@@ -149,8 +149,8 @@ pub fn log<D: Driver>(
 #[macro_export]
 macro_rules! error {
     ($driver:expr, $($args:tt)+) => {
-        if log::Level::Error <= $driver.max_log_level() {
-            $crate::driver::log(
+        if log::Level::Error <= $crate::Driver::max_log_level($driver) {
+            $crate::log(
                 $driver,
                 log::Level::Error,
                 format_args!($($args)+),
@@ -162,10 +162,11 @@ macro_rules! error {
     }
 }
 
+#[macro_export]
 macro_rules! warn {
     ($driver:expr, $($args:tt)+) => {
-        if log::Level::Warn <= $driver.max_log_level() {
-            $crate::driver::log(
+        if log::Level::Warn <= $crate::Driver::max_log_level($driver) {
+            $crate::log(
                 $driver,
                 log::Level::Warn,
                 format_args!($($args)+),
@@ -180,8 +181,8 @@ macro_rules! warn {
 #[macro_export]
 macro_rules! debug {
     ($driver:expr, $($args:tt)+) => {
-        if log::Level::Debug <= $driver.max_log_level() {
-            $crate::driver::log(
+        if log::Level::Debug <= $crate::Driver::max_log_level($driver) {
+            $crate::log(
                 $driver,
                 log::Level::Debug,
                 format_args!($($args)+),
@@ -196,8 +197,8 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! trace {
     ($driver:expr, $($args:tt)+) => {
-        if log::Level::Trace <= $driver.max_log_level() {
-            $crate::driver::log(
+        if log::Level::Trace <= $crate::Driver::max_log_level($driver) {
+            $crate::log(
                 $driver,
                 log::Level::Trace,
                 format_args!($($args)+),

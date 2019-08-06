@@ -20,7 +20,6 @@ mod driver;
 mod error;
 mod guid;
 mod merge;
-#[macro_use]
 mod store;
 mod tree;
 
