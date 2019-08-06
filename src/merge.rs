@@ -19,7 +19,7 @@ use std::{
 
 use crate::driver::{AbortSignal, DefaultAbortSignal, DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
-use crate::guid::{Guid, IsValidGuid};
+use crate::guid::{Guid, IsValidGuid, TAGS_GUID};
 use crate::tree::{Content, MergeState, MergedNode, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
@@ -1773,7 +1773,7 @@ impl<'t> MergedRoot<'t> {
     /// apply to the local tree so that it matches the merged tree.
     pub fn completion_ops(&self) -> CompletionOps<'_> {
         let mut ops = CompletionOps::default();
-        accumulate(&mut ops, self.node(), 1);
+        accumulate(&mut ops, self.node(), 1, false);
         for guid in self.delete_locally.iter() {
             if self.local_tree.mentions(guid) && self.remote_tree.mentions(guid) {
                 // Only flag tombstones for items that exist in both trees,
@@ -1847,9 +1847,10 @@ pub struct CompletionOps<'t> {
     pub change_guids: Vec<ChangeGuid<'t>>,
     pub apply_remote_items: Vec<ApplyRemoteItem<'t>>,
     pub apply_new_local_structure: Vec<ApplyNewLocalStructure<'t>>,
+    pub flag_for_upload: Vec<FlagForUpload<'t>>,
     pub skip_upload: Vec<SkipUpload<'t>>,
-    pub upload: Vec<Upload<'t>>,
     pub flag_as_merged: Vec<FlagAsMerged<'t>>,
+    pub upload: Vec<Upload<'t>>,
 }
 
 /// A completion op to change the local GUID to the merged GUID. This is used
@@ -1940,13 +1941,13 @@ impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
 
 /// A completion op to flag a local item for upload.
 #[derive(Clone, Copy, Debug)]
-pub struct Upload<'t> {
+pub struct FlagForUpload<'t> {
     pub merged_node: &'t MergedNode<'t>,
 }
 
-impl<'t> fmt::Display for Upload<'t> {
+impl<'t> fmt::Display for FlagForUpload<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Upload {}", self.merged_node.guid)
+        write!(f, "Flag {} for upload", self.merged_node.guid)
     }
 }
 
@@ -1963,13 +1964,25 @@ impl<'t> fmt::Display for SkipUpload<'t> {
     }
 }
 
+/// A completion op to upload or reupload a merged item.
+#[derive(Clone, Copy, Debug)]
+pub struct Upload<'t> {
+    pub merged_node: &'t MergedNode<'t>,
+}
+
+impl<'t> fmt::Display for Upload<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Upload {}", self.merged_node.guid)
+    }
+}
+
 /// A completion op to flag a remote item as merged.
 #[derive(Clone, Copy, Debug)]
 pub struct FlagAsMerged<'t>(&'t Guid);
 
 impl<'t> FlagAsMerged<'t> {
     #[inline]
-    pub fn guid(&self) -> &'t Guid {
+    pub fn guid(self) -> &'t Guid {
         self.0
     }
 }
@@ -1982,8 +1995,18 @@ impl<'t> fmt::Display for FlagAsMerged<'t> {
 
 /// Recursively accumulates completion ops, starting at `merged_node` and
 /// drilling down into all its descendants.
-fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, level: usize) {
+fn accumulate<'t>(
+    ops: &mut CompletionOps<'t>,
+    merged_node: &'t MergedNode<'t>,
+    level: usize,
+    is_tagging: bool,
+) {
     for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
+        let is_tagging = if merged_child_node.guid == TAGS_GUID {
+            true
+        } else {
+            is_tagging
+        };
         if merged_child_node.merge_state.should_apply_item() {
             let apply_remote_item = ApplyRemoteItem {
                 merged_node: merged_child_node,
@@ -2029,10 +2052,10 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
         match (local_needs_merge, should_upload) {
             (false, true) => {
                 // Local item isn't flagged for upload, but should be.
-                let upload = Upload {
+                let flag_for_upload = FlagForUpload {
                     merged_node: merged_child_node,
                 };
-                ops.upload.push(upload);
+                ops.flag_for_upload.push(flag_for_upload);
             }
             (true, false) => {
                 // Local item flagged for upload when it doesn't need to be.
@@ -2042,6 +2065,14 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
                 ops.skip_upload.push(skip_upload);
             }
             _ => {}
+        }
+        if should_upload && !is_tagging {
+            // (Re)upload items. Ignore the tags root and its descendants:
+            // they're part of the local tree on Desktop (and will be removed
+            // in bug 424160), but aren't synced as part of the structure.
+            ops.upload.push(Upload {
+                merged_node: merged_child_node,
+            });
         }
         if let Some(remote_child_node) = merged_child_node.merge_state.remote_node() {
             if remote_child_node.needs_merge && !should_upload {
@@ -2053,6 +2084,6 @@ fn accumulate<'t>(ops: &mut CompletionOps<'t>, merged_node: &'t MergedNode<'t>, 
                 ops.flag_as_merged.push(flag_as_merged);
             }
         }
-        accumulate(ops, merged_child_node, level + 1);
+        accumulate(ops, merged_child_node, level + 1, is_tagging);
     }
 }
