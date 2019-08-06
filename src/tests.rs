@@ -25,8 +25,8 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 use crate::merge::{Merger, StructureCounts};
 use crate::tree::{
-    Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, MergeState, MergedNode,
-    Problem, ProblemCounts, Problems, Tree, Validity,
+    self, Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, MergeState, Problem,
+    ProblemCounts, Problems, Tree, Validity,
 };
 
 #[derive(Debug)]
@@ -105,8 +105,12 @@ macro_rules! nodes {
     }};
 }
 
+/// The name of a merge state. These match `tree::MergeState`, but without the
+/// associated nodes to simplify comparisons. We also don't distinguish between
+/// `{Local, Remote}Only` and `{Local, Remote}`, since that doesn't matter for
+/// tests.
 #[derive(Debug)]
-enum MergeStateTag {
+enum MergeStateName {
     Local,
     LocalWithNewLocalStructure,
     Remote,
@@ -115,52 +119,54 @@ enum MergeStateTag {
     UnchangedWithNewLocalStructure,
 }
 
+/// A merged node produced by the `merged_nodes!` macro. Can be compared to
+/// a `tree::MergedNode` using `assert_eq!`.
 #[derive(Debug)]
-struct TestMergedNode {
+struct MergedNode {
     guid: Guid,
-    state: MergeStateTag,
-    children: Vec<TestMergedNode>,
+    merge_state_name: MergeStateName,
+    children: Vec<MergedNode>,
 }
 
-impl TestMergedNode {
-    fn new(guid: Guid, state: MergeStateTag) -> TestMergedNode {
-        TestMergedNode {
+impl MergedNode {
+    fn new(guid: Guid, merge_state_name: MergeStateName) -> MergedNode {
+        MergedNode {
             guid,
-            state,
+            merge_state_name,
             children: Vec::new(),
         }
     }
 }
 
-impl<'t> PartialEq<MergedNode<'t>> for TestMergedNode {
-    fn eq(&self, other: &MergedNode<'t>) -> bool {
+impl<'t> PartialEq<tree::MergedNode<'t>> for MergedNode {
+    fn eq(&self, other: &tree::MergedNode<'t>) -> bool {
         if self.guid != other.guid {
             return false;
         }
-        let merge_state_matches = match (&self.state, other.merge_state) {
-            (MergeStateTag::Local, MergeState::LocalOnly(_)) => true,
+        let merge_state_matches = match (&self.merge_state_name, other.merge_state) {
+            (MergeStateName::Local, MergeState::LocalOnly(_)) => true,
             (
-                MergeStateTag::LocalWithNewLocalStructure,
+                MergeStateName::LocalWithNewLocalStructure,
                 MergeState::LocalOnlyWithNewLocalStructure(_),
             ) => true,
-            (MergeStateTag::Remote, MergeState::RemoteOnly(_)) => true,
+            (MergeStateName::Remote, MergeState::RemoteOnly(_)) => true,
             (
-                MergeStateTag::RemoteWithNewRemoteStructure,
+                MergeStateName::RemoteWithNewRemoteStructure,
                 MergeState::RemoteOnlyWithNewRemoteStructure(_),
             ) => true,
-            (MergeStateTag::Local, MergeState::Local { .. }) => true,
+            (MergeStateName::Local, MergeState::Local { .. }) => true,
             (
-                MergeStateTag::LocalWithNewLocalStructure,
+                MergeStateName::LocalWithNewLocalStructure,
                 MergeState::LocalWithNewLocalStructure { .. },
             ) => true,
-            (MergeStateTag::Remote, MergeState::Remote { .. }) => true,
+            (MergeStateName::Remote, MergeState::Remote { .. }) => true,
             (
-                MergeStateTag::RemoteWithNewRemoteStructure,
+                MergeStateName::RemoteWithNewRemoteStructure,
                 MergeState::RemoteWithNewRemoteStructure { .. },
             ) => true,
-            (MergeStateTag::Unchanged, MergeState::Unchanged { .. }) => true,
+            (MergeStateName::Unchanged, MergeState::Unchanged { .. }) => true,
             (
-                MergeStateTag::UnchangedWithNewLocalStructure,
+                MergeStateName::UnchangedWithNewLocalStructure,
                 MergeState::UnchangedWithNewLocalStructure { .. },
             ) => true,
             _ => false,
@@ -175,7 +181,7 @@ impl<'t> PartialEq<MergedNode<'t>> for TestMergedNode {
 macro_rules! merged_nodes {
     ($children:tt) => { merged_nodes!(ROOT_GUID, Local, $children) };
     ($guid:expr, $state:ident) => {
-        TestMergedNode::new(Guid::from($guid), MergeStateTag::$state)
+        MergedNode::new(Guid::from($guid), MergeStateName::$state)
     };
     ($guid:expr, $state:ident, { $(( $($children:tt)+ )),* }) => {{
         #[allow(unused_mut)]

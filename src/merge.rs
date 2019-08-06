@@ -559,6 +559,8 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 "Remote child {} already seen in another folder and merged",
                 remote_child_node
             );
+            // Omitting a remote child that we already merged locally means we
+            // have a new remote structure.
             merged_node.merge_state = merged_node.merge_state.with_new_remote_structure();
             return Ok(());
         }
@@ -763,7 +765,9 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
         local_child_node: Node<'t>,
     ) -> Result<()> {
         if self.merged_guids.contains(&local_child_node.guid) {
-            // We already merged the child when we walked another folder.
+            // We already merged the child when we walked another folder. Since
+            // a tree can't have duplicate GUIDs, we must have merged the remote
+            // child, so we have a new local structure.
             trace!(
                 self.driver,
                 "Local child {} already seen in another folder and merged",
@@ -1867,8 +1871,10 @@ pub struct ChangeGuid<'t> {
 }
 
 impl<'t> ChangeGuid<'t> {
+    /// Returns the local node for this completion op. Panics if the local node
+    /// isn't set, as we should never emit a `ChangeGuid` op in that case.
     #[inline]
-    pub fn local_node(&self) -> &Node<'t> {
+    pub fn local_node(&self) -> &'t Node<'t> {
         self.merged_node
             .merge_state
             .local_node()
@@ -1896,8 +1902,11 @@ pub struct ApplyRemoteItem<'t> {
 }
 
 impl<'t> ApplyRemoteItem<'t> {
+    /// Returns the remote node for this completion op. Panics if the remote
+    /// node isn't set, as we should never emit an `ApplyRemoteItem` op in
+    /// that case.
     #[inline]
-    pub fn remote_node(&self) -> &Node<'t> {
+    pub fn remote_node(&self) -> &'t Node<'t> {
         self.merged_node
             .merge_state
             .remote_node()
@@ -1981,6 +1990,7 @@ impl<'t> fmt::Display for Upload<'t> {
 pub struct FlagAsMerged<'t>(&'t Guid);
 
 impl<'t> FlagAsMerged<'t> {
+    /// Returns the remote GUID for the item to flag as merged.
     #[inline]
     pub fn guid(self) -> &'t Guid {
         self.0
