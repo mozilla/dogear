@@ -53,27 +53,31 @@ pub trait Store<E: From<Error>> {
         signal: &impl AbortSignal,
     ) -> Result<(), E> {
         signal.err_if_aborted()?;
+        debug!(driver, "Building local tree");
         let (local_tree, time) = with_timing(|| self.fetch_local_tree())?;
         driver.record_telemetry_event(TelemetryEvent::FetchLocalTree(TreeStats {
             items: local_tree.size(),
             problems: local_tree.problems().counts(),
             time,
         }));
-        debug!(driver, "Built local tree from mirror\n{}", local_tree);
+        trace!(driver, "Built local tree from mirror\n{}", local_tree);
 
         signal.err_if_aborted()?;
+        debug!(driver, "Building remote tree");
         let (remote_tree, time) = with_timing(|| self.fetch_remote_tree())?;
         driver.record_telemetry_event(TelemetryEvent::FetchRemoteTree(TreeStats {
             items: remote_tree.size(),
             problems: remote_tree.problems().counts(),
             time,
         }));
-        debug!(driver, "Built remote tree from mirror\n{}", remote_tree);
+        trace!(driver, "Built remote tree from mirror\n{}", remote_tree);
 
+        signal.err_if_aborted()?;
+        debug!(driver, "Building merged tree");
         let merger = Merger::with_driver(driver, signal, &local_tree, &remote_tree);
         let (merged_root, time) = with_timing(|| merger.merge())?;
         driver.record_telemetry_event(TelemetryEvent::Merge(time, *merged_root.counts()));
-        debug!(
+        trace!(
             driver,
             "Built new merged tree\n{}\nDelete Locally: [{}]\nDelete Remotely: [{}]",
             merged_root.node().to_ascii_string(),
@@ -89,6 +93,8 @@ pub trait Store<E: From<Error>> {
                 .join(", ")
         );
 
+        signal.err_if_aborted()?;
+        debug!(driver, "Applying merged tree");
         let ((), time) = with_timing(|| self.apply(merged_root))?;
         driver.record_telemetry_event(TelemetryEvent::Apply(time));
 
