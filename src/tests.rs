@@ -60,7 +60,7 @@ impl TryFrom<Node> for Builder {
                     _ => return Err(err),
                 }
             }
-            b.mutate(&guid).by_structure(&parent_guid)?;
+            b.parent_for(&guid).by_structure(&parent_guid)?;
             for child in node.children {
                 inflate(b, &guid, child)?;
             }
