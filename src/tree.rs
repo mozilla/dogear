@@ -113,6 +113,17 @@ impl Tree {
             .map(|&index| Node(self, &self.entries[index]))
     }
 
+    /// Returns a node or tombstone record for the given `guid`.
+    pub fn record_for_guid(&self, guid: &Guid) -> Record<'_> {
+        if self.deleted_guids.contains(guid) {
+            Record::Deleted
+        } else if let Some(&index) = self.entry_index_by_guid.get(guid) {
+            Record::Exists(Node(self, &self.entries[index]))
+        } else {
+            Record::Unmentioned
+        }
+    }
+
     /// Returns the structure divergences found when building the tree.
     #[inline]
     pub fn problems(&self) -> &Problems {
@@ -1419,13 +1430,31 @@ impl ProblemCounts {
     }
 }
 
+/// A record for an item or tombstone in a bookmark tree.
+#[derive(Clone, Copy, Debug)]
+pub enum Record<'t> {
+    /// The item isn't mentioned at all.
+    Unmentioned,
+    /// The item exists.
+    Exists(Node<'t>),
+    /// The item doesn't exist, but is known to be deleted.
+    Deleted,
+}
+
 /// A node in a bookmark tree that knows its parent and children, and
 /// dereferences to its item.
 #[derive(Clone, Copy, Debug)]
 pub struct Node<'t>(&'t Tree, &'t TreeEntry);
 
 impl<'t> Node<'t> {
+    /// Returns the item for this node.
+    #[inline]
+    pub fn item(&self) -> &'t Item {
+        &self.1.item
+    }
+
     /// Returns content info for deduping this item, if available.
+    #[inline]
     pub fn content(&self) -> Option<&'t Content> {
         self.1.content.as_ref()
     }
@@ -1528,7 +1557,7 @@ impl<'t> Node<'t> {
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
-        match self.1.item.kind {
+        match self.item().kind {
             Kind::Folder => {
                 let children_prefix = format!("{}| ", prefix);
                 let children = self
@@ -1541,13 +1570,13 @@ impl<'t> Node<'t> {
                     "📂"
                 };
                 if children.is_empty() {
-                    format!("{}{} {}", prefix, kind, self.1.item)
+                    format!("{}{} {}", prefix, kind, self.item())
                 } else {
                     format!(
                         "{}{} {}\n{}",
                         prefix,
                         kind,
-                        self.1.item,
+                        self.item(),
                         children.join("\n")
                     )
                 }
@@ -1558,7 +1587,7 @@ impl<'t> Node<'t> {
                 } else {
                     "🔖"
                 };
-                format!("{}{} {}", prefix, kind, self.1.item)
+                format!("{}{} {}", prefix, kind, self.item())
             }
         }
     }
@@ -1573,21 +1602,22 @@ impl<'t> Node<'t> {
     /// these are non-syncable.
     #[inline]
     pub fn is_built_in_root(&self) -> bool {
-        self.1.item.guid.is_built_in_root()
+        self.item().guid.is_built_in_root()
     }
 }
 
 impl<'t> Deref for Node<'t> {
     type Target = Item;
 
+    #[inline]
     fn deref(&self) -> &Item {
-        &self.1.item
+        self.item()
     }
 }
 
 impl<'t> fmt::Display for Node<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.1.item.fmt(f)
+        self.item().fmt(f)
     }
 }
 

@@ -89,12 +89,12 @@ pub trait Store {
             merged_root.node().to_ascii_string(),
             merged_root
                 .local_deletions()
-                .map(|d| d.guid.as_str())
+                .map(|guid| guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
             merged_root
                 .remote_deletions()
-                .map(|d| d.guid.as_str())
+                .map(|guid| guid.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
