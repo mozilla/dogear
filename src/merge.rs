@@ -1869,10 +1869,10 @@ pub struct CompletionOps<'t> {
     pub change_guids: Vec<ChangeGuid<'t>>,
     pub apply_remote_items: Vec<ApplyRemoteItem<'t>>,
     pub apply_new_local_structure: Vec<ApplyNewLocalStructure<'t>>,
-    pub flag_for_upload: Vec<FlagForUpload<'t>>,
-    pub skip_upload: Vec<SkipUpload<'t>>,
-    pub flag_as_merged: Vec<FlagAsMerged<'t>>,
-    pub upload: Vec<Upload<'t>>,
+    pub set_local_unmerged: Vec<SetLocalUnmerged<'t>>,
+    pub set_local_merged: Vec<SetLocalMerged<'t>>,
+    pub set_remote_merged: Vec<SetRemoteMerged<'t>>,
+    pub upload_items: Vec<UploadItem<'t>>,
 }
 
 impl<'t> CompletionOps<'t> {
@@ -1882,10 +1882,10 @@ impl<'t> CompletionOps<'t> {
         self.change_guids.is_empty()
             && self.apply_remote_items.is_empty()
             && self.apply_new_local_structure.is_empty()
-            && self.flag_for_upload.is_empty()
-            && self.skip_upload.is_empty()
-            && self.flag_as_merged.is_empty()
-            && self.upload.is_empty()
+            && self.set_local_unmerged.is_empty()
+            && self.set_local_merged.is_empty()
+            && self.set_remote_merged.is_empty()
+            && self.upload_items.is_empty()
     }
 }
 
@@ -1982,11 +1982,11 @@ impl<'t> fmt::Display for ApplyNewLocalStructure<'t> {
 
 /// A completion op to flag a local item for upload.
 #[derive(Clone, Copy, Debug)]
-pub struct FlagForUpload<'t> {
+pub struct SetLocalUnmerged<'t> {
     pub merged_node: &'t MergedNode<'t>,
 }
 
-impl<'t> fmt::Display for FlagForUpload<'t> {
+impl<'t> fmt::Display for SetLocalUnmerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Flag {} for upload", self.merged_node.guid)
     }
@@ -1995,11 +1995,11 @@ impl<'t> fmt::Display for FlagForUpload<'t> {
 /// A completion op to skip uploading a local item after resolving merge
 /// conflicts.
 #[derive(Clone, Copy, Debug)]
-pub struct SkipUpload<'t> {
+pub struct SetLocalMerged<'t> {
     pub merged_node: &'t MergedNode<'t>,
 }
 
-impl<'t> fmt::Display for SkipUpload<'t> {
+impl<'t> fmt::Display for SetLocalMerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Don't upload {}", self.merged_node.guid)
     }
@@ -2007,11 +2007,11 @@ impl<'t> fmt::Display for SkipUpload<'t> {
 
 /// A completion op to upload or reupload a merged item.
 #[derive(Clone, Copy, Debug)]
-pub struct Upload<'t> {
+pub struct UploadItem<'t> {
     pub merged_node: &'t MergedNode<'t>,
 }
 
-impl<'t> fmt::Display for Upload<'t> {
+impl<'t> fmt::Display for UploadItem<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Upload {}", self.merged_node.guid)
     }
@@ -2019,9 +2019,9 @@ impl<'t> fmt::Display for Upload<'t> {
 
 /// A completion op to flag a remote item as merged.
 #[derive(Clone, Copy, Debug)]
-pub struct FlagAsMerged<'t>(&'t Guid);
+pub struct SetRemoteMerged<'t>(&'t Guid);
 
-impl<'t> FlagAsMerged<'t> {
+impl<'t> SetRemoteMerged<'t> {
     /// Returns the remote GUID for the item to flag as merged.
     #[inline]
     pub fn guid(self) -> &'t Guid {
@@ -2029,7 +2029,7 @@ impl<'t> FlagAsMerged<'t> {
     }
 }
 
-impl<'t> fmt::Display for FlagAsMerged<'t> {
+impl<'t> fmt::Display for SetRemoteMerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Flag {} as merged", self.guid())
     }
@@ -2094,17 +2094,17 @@ fn accumulate<'t>(
         match (local_needs_merge, should_upload) {
             (false, true) => {
                 // Local item isn't flagged for upload, but should be.
-                let flag_for_upload = FlagForUpload {
+                let set_local_unmerged = SetLocalUnmerged {
                     merged_node: merged_child_node,
                 };
-                ops.flag_for_upload.push(flag_for_upload);
+                ops.set_local_unmerged.push(set_local_unmerged);
             }
             (true, false) => {
                 // Local item flagged for upload when it doesn't need to be.
-                let skip_upload = SkipUpload {
+                let set_local_merged = SetLocalMerged {
                     merged_node: merged_child_node,
                 };
-                ops.skip_upload.push(skip_upload);
+                ops.set_local_merged.push(set_local_merged);
             }
             _ => {}
         }
@@ -2112,7 +2112,7 @@ fn accumulate<'t>(
             // (Re)upload items. Ignore the tags root and its descendants:
             // they're part of the local tree on Desktop (and will be removed
             // in bug 424160), but aren't synced as part of the structure.
-            ops.upload.push(Upload {
+            ops.upload_items.push(UploadItem {
                 merged_node: merged_child_node,
             });
         }
@@ -2122,8 +2122,8 @@ fn accumulate<'t>(
                 // reuploaded, flag it as merged in the remote tree. Note that
                 // we _don't_ emit this for locally revived items, or items with
                 // new remote structure.
-                let flag_as_merged = FlagAsMerged(&remote_child_node.guid);
-                ops.flag_as_merged.push(flag_as_merged);
+                let set_remote_merged = SetRemoteMerged(&remote_child_node.guid);
+                ops.set_remote_merged.push(set_remote_merged);
             }
         }
         accumulate(ops, merged_child_node, level + 1, is_tagging);
