@@ -76,10 +76,21 @@ impl Tree {
         Node(self, &self.entries[0])
     }
 
+    /// Returns an iterator for all node and tombstone GUIDs.
+    pub fn guids(&self) -> impl Iterator<Item = &Guid> {
+        self.entries.iter().map(|entry| &entry.item.guid)
+    }
+
     /// Returns an iterator for all tombstoned GUIDs.
     #[inline]
-    pub fn deletions(&self) -> impl Iterator<Item = &Guid> {
-        self.deleted_guids.iter()
+    pub fn deletions(&self) -> &HashSet<Guid> {
+        &self.deleted_guids
+    }
+
+    /// Indicates if the GUID exists in the tree.
+    #[inline]
+    pub fn exists(&self, guid: &Guid) -> bool {
+        self.entry_index_by_guid.contains_key(guid)
     }
 
     /// Indicates if the GUID is known to be deleted. If `Tree::node_for_guid`
@@ -97,31 +108,12 @@ impl Tree {
         self.entry_index_by_guid.contains_key(guid) || self.deleted_guids.contains(guid)
     }
 
-    /// Returns an iterator for all node and tombstone GUIDs.
-    pub fn guids(&self) -> impl Iterator<Item = &Guid> {
-        self.entries
-            .iter()
-            .map(|entry| &entry.item.guid)
-            .chain(self.deleted_guids.iter())
-    }
-
     /// Returns the node for a given `guid`, or `None` if a node with the `guid`
     /// doesn't exist in the tree, or was deleted.
     pub fn node_for_guid(&self, guid: &Guid) -> Option<Node<'_>> {
         self.entry_index_by_guid
             .get(guid)
             .map(|&index| Node(self, &self.entries[index]))
-    }
-
-    /// Returns a node or tombstone record for the given `guid`.
-    pub fn record_for_guid(&self, guid: &Guid) -> Record<'_> {
-        if self.deleted_guids.contains(guid) {
-            Record::Deleted
-        } else if let Some(&index) = self.entry_index_by_guid.get(guid) {
-            Record::Exists(Node(self, &self.entries[index]))
-        } else {
-            Record::Unmentioned
-        }
     }
 
     /// Returns the structure divergences found when building the tree.
@@ -1428,17 +1420,6 @@ impl ProblemCounts {
             missing_children: self.missing_children + other.missing_children,
         }
     }
-}
-
-/// A record for an item or tombstone in a bookmark tree.
-#[derive(Clone, Copy, Debug)]
-pub enum Record<'t> {
-    /// The item isn't mentioned at all.
-    Unmentioned,
-    /// The item exists.
-    Exists(Node<'t>),
-    /// The item doesn't exist, but is known to be deleted.
-    Deleted,
 }
 
 /// A node in a bookmark tree that knows its parent and children, and

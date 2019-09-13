@@ -20,7 +20,7 @@ use std::{
 use crate::driver::{AbortSignal, DefaultAbortSignal, DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, IsValidGuid, TAGS_GUID};
-use crate::tree::{Content, MergeState, MergedNode, Node, Record, Tree, Validity};
+use crate::tree::{Content, MergeState, MergedNode, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -50,8 +50,6 @@ pub struct StructureCounts {
     /// Total number of nodes in the merged tree, excluding the
     /// root.
     pub merged_nodes: usize,
-    /// Total number of deletions to apply, local and remote.
-    pub merged_deletions: usize,
 }
 
 /// Holds (matching remote dupes for local GUIDs, matching local dupes for
@@ -156,25 +154,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             self.two_way_merge(local_root_node, remote_root_node)?
         };
 
-        // Any remaining deletions on one side should be deleted on the other side.
-        // This happens when the remote tree has tombstones for items that don't
-        // exist locally, or the local tree has tombstones for items that
-        // aren't on the server.
-        for guid in self.local_tree.deletions() {
-            self.signal.err_if_aborted()?;
-            if !self.mentions(guid) {
-                self.delete_remotely.insert(guid.clone());
-                self.structure_counts.merged_deletions += 1;
-            }
-        }
-        for guid in self.remote_tree.deletions() {
-            self.signal.err_if_aborted()?;
-            if !self.mentions(guid) {
-                self.delete_locally.insert(guid.clone());
-                self.structure_counts.merged_deletions += 1;
-            }
-        }
-
         // The merged tree should know about all items mentioned in the local
         // and remote trees. Otherwise, it's incomplete, and we can't apply it.
         // This indicates a bug in the merger.
@@ -275,7 +254,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 self.merged_guids.insert(new_guid.clone());
                 // Upload tombstones for changed remote GUIDs.
                 self.delete_remotely.insert(remote_node.guid.clone());
-                self.structure_counts.merged_deletions += 1;
             }
             new_guid
         };
@@ -345,7 +323,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 self.merged_guids.insert(new_guid.clone());
                 // Upload tombstones for changed remote GUIDs.
                 self.delete_remotely.insert(remote_node.guid.clone());
-                self.structure_counts.merged_deletions += 1;
             }
             new_guid
         };
@@ -1423,7 +1400,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 }
             }
         }
-        self.structure_counts.merged_deletions += 1;
         Ok(StructureChange::Deleted)
     }
 
@@ -1486,7 +1462,6 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 }
             }
         }
-        self.structure_counts.merged_deletions += 1;
         Ok(StructureChange::Deleted)
     }
 
@@ -1788,77 +1763,85 @@ impl<'t> MergedRoot<'t> {
     pub fn completion_ops(&self) -> CompletionOps<'_> {
         let mut ops = CompletionOps::default();
         accumulate(&mut ops, self.node(), 1, false);
-        for guid in self.deletions() {
+
+        // Clean up tombstones for local and remote items that are revived on
+        // the other side.
+        for guid in self
+            .local_tree
+            .deletions()
+            .difference(&self.delete_remotely)
+        {
+            // For ignored local deletions, we remove the local tombstone. If
+            // the item is already deleted remotely, we also flag the remote
+            // tombstone as merged.
+            ops.delete_local_tombstones.push(DeleteLocalTombstone(guid));
+            if self.remote_tree.is_deleted(guid) {
+                ops.set_remote_merged.push(SetRemoteMerged(guid));
+            }
+        }
+        for guid in self
+            .remote_tree
+            .deletions()
+            .difference(&self.delete_locally)
+            .filter(|guid| !self.local_tree.exists(guid))
+        {
+            // Ignored remote deletions are handled a little differently. Unlike
+            // local tombstones, which are stored separately from items, remote
+            // tombstones and items are stored in the same table. This means we
+            // only need to flag the remote tombstone as merged if it's for an
+            // item that doesn't exist locally. If the local item does exist,
+            // we can avoid an extra write to flag the tombstone that we'll
+            // replace with the item, anyway. If the item is already deleted
+            // locally, we also delete the local tombstone.
+            ops.set_remote_merged.push(SetRemoteMerged(guid));
+            if self.local_tree.is_deleted(guid) {
+                ops.delete_local_tombstones.push(DeleteLocalTombstone(guid));
+            }
+        }
+
+        // Emit completion ops for deleted items.
+        for guid in self.delete_locally.union(&self.delete_remotely) {
             match (
-                self.local_tree.record_for_guid(guid),
-                self.remote_tree.record_for_guid(guid),
+                self.local_tree.node_for_guid(guid),
+                self.remote_tree.node_for_guid(guid),
             ) {
-                (Record::Unmentioned, Record::Unmentioned) => {
-                    // The item isn't mentioned (existing or deleted) on either
-                    // side, so nothing to do.
-                }
-                (Record::Unmentioned, Record::Exists(remote_node)) => {
-                    // The item isn't mentioned locally, but exists remotely.
-                    // This is the case for invalid remote-only items. Upload a
-                    // tombstone, but don't flag it as remotely merged; we'll do
-                    // that when we store the uploaded tombstone.
-                    ops.insert_local_tombstones
-                        .push(InsertLocalTombstone(remote_node));
-                    ops.upload_tombstones
-                        .push(UploadTombstone(&remote_node.item().guid));
-                }
-                (Record::Unmentioned, Record::Deleted) => {
-                    // The item isn't mentioned locally, but is deleted
-                    // remotely. This is the case for a first sync, and will
-                    // change if we store tombstones (bug 1343103). For now,
-                    // we only flag the tombstone as remotely merged.
-                    ops.set_remote_merged.push(SetRemoteMerged(guid));
-                }
-                (Record::Exists(local_node), Record::Unmentioned) => {
-                    // The item exists locally, but isn't mentioned remotely.
-                    // Delete it from the local tree, but don't upload a
-                    // tombstone or flag it as remotely merged, since it's not
-                    // on the server. This is the case for invalid local-only
-                    // items.
-                    ops.delete_local_items.push(DeleteLocalItem(local_node));
-                }
-                (Record::Exists(local_node), Record::Exists(remote_node)) => {
-                    // The item exists on both sides, and is flagged for
-                    // deletion. This is the case for non-syncable and invalid
-                    // items. Delete the item from the local tree and upload a
-                    // tombstone, but don't flag it as remotely merged; storing
-                    // the uploaded tombstone takes care of that.
+                (Some(local_node), Some(remote_node)) => {
+                    // Delete items that are non-syncable or invalid on both
+                    // sides.
                     ops.delete_local_items.push(DeleteLocalItem(local_node));
                     ops.insert_local_tombstones
                         .push(InsertLocalTombstone(remote_node));
-                    ops.upload_tombstones
-                        .push(UploadTombstone(&remote_node.item().guid));
+                    ops.upload_tombstones.push(UploadTombstone(guid));
                 }
-                (Record::Exists(local_node), Record::Deleted) => {
-                    // The item exists locally, and is deleted remotely. This is
-                    // the most common case for incoming deletions. Delete the
-                    // item from the local tree, and flag the tombstone as
-                    // merged.
+                (Some(local_node), None) => {
+                    // Apply remote tombstones, or delete invalid local-only
+                    // items. If the item is deleted remotely, flag the remote
+                    // tombstone as merged. If not, we don't need to upload one,
+                    // since the item is only known locally.
                     ops.delete_local_items.push(DeleteLocalItem(local_node));
-                    ops.set_remote_merged.push(SetRemoteMerged(guid));
+                    if self.remote_tree.is_deleted(guid) {
+                        ops.set_remote_merged.push(SetRemoteMerged(guid));
+                    }
                 }
-                (Record::Deleted, Record::Unmentioned) => {
-                    // Uploading a tombstone for a nonexistent item. Nothing
-                    // to do here.
+                (None, Some(remote_node)) => {
+                    // Take local tombstones, or delete invalid remote-only
+                    // items. If it's not already deleted locally, insert a
+                    // tombstone for the item.
+                    if !self.local_tree.is_deleted(guid) {
+                        ops.insert_local_tombstones
+                            .push(InsertLocalTombstone(remote_node));
+                    }
+                    ops.upload_tombstones.push(UploadTombstone(guid));
                 }
-                (Record::Deleted, Record::Exists(remote_node)) => {
-                    // The item is deleted locally, and exists remotely. Upload
-                    // a tombstone. This is the common case for local deletions.
-                    ops.upload_tombstones
-                        .push(UploadTombstone(&remote_node.item().guid));
-                }
-                (Record::Deleted, Record::Deleted) => {
-                    // The item is deleted on both sides. Just flag it as
-                    // remotely merged.
-                    ops.set_remote_merged.push(SetRemoteMerged(guid));
+                (None, None) => {
+                    // The item doesn't exist on either side, but was flagged
+                    // for deletion on both. This should never happen, and
+                    // indicates a bug in our merger.
+                    unreachable!("Can't delete nonexistent items on both sides")
                 }
             }
         }
+
         ops
     }
 
@@ -1900,8 +1883,9 @@ pub struct CompletionOps<'t> {
     pub set_local_unmerged: Vec<SetLocalUnmerged<'t>>,
     pub set_local_merged: Vec<SetLocalMerged<'t>>,
     pub set_remote_merged: Vec<SetRemoteMerged<'t>>,
-    pub delete_local_items: Vec<DeleteLocalItem<'t>>,
+    pub delete_local_tombstones: Vec<DeleteLocalTombstone<'t>>,
     pub insert_local_tombstones: Vec<InsertLocalTombstone<'t>>,
+    pub delete_local_items: Vec<DeleteLocalItem<'t>>,
     pub upload_items: Vec<UploadItem<'t>>,
     pub upload_tombstones: Vec<UploadTombstone<'t>>,
 }
@@ -1916,10 +1900,32 @@ impl<'t> CompletionOps<'t> {
             && self.set_local_unmerged.is_empty()
             && self.set_local_merged.is_empty()
             && self.set_remote_merged.is_empty()
-            && self.delete_local_items.is_empty()
+            && self.delete_local_tombstones.is_empty()
             && self.insert_local_tombstones.is_empty()
+            && self.delete_local_items.is_empty()
             && self.upload_items.is_empty()
             && self.upload_tombstones.is_empty()
+    }
+
+    /// Returns a printable summary of all completion ops to apply.
+    pub fn summarize(&self) -> Vec<String> {
+        std::iter::empty()
+            .chain(self.change_guids.iter().map(ToString::to_string))
+            .chain(self.apply_remote_items.iter().map(ToString::to_string))
+            .chain(
+                self.apply_new_local_structure
+                    .iter()
+                    .map(ToString::to_string),
+            )
+            .chain(self.set_local_unmerged.iter().map(ToString::to_string))
+            .chain(self.set_local_merged.iter().map(ToString::to_string))
+            .chain(self.set_remote_merged.iter().map(ToString::to_string))
+            .chain(self.delete_local_tombstones.iter().map(ToString::to_string))
+            .chain(self.insert_local_tombstones.iter().map(ToString::to_string))
+            .chain(self.delete_local_items.iter().map(ToString::to_string))
+            .chain(self.upload_items.iter().map(ToString::to_string))
+            .chain(self.upload_tombstones.iter().map(ToString::to_string))
+            .collect()
     }
 }
 
@@ -2102,6 +2108,24 @@ impl<'t> InsertLocalTombstone<'t> {
 impl<'t> fmt::Display for InsertLocalTombstone<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Upload tombstone for {}", self.0.guid)
+    }
+}
+
+/// A completion op to delete a local tombstone.
+#[derive(Clone, Copy, Debug)]
+pub struct DeleteLocalTombstone<'t>(&'t Guid);
+
+impl<'t> DeleteLocalTombstone<'t> {
+    /// Returns the GUID of the tombstone.
+    #[inline]
+    pub fn guid(self) -> &'t Guid {
+        self.0
+    }
+}
+
+impl<'t> fmt::Display for DeleteLocalTombstone<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Remove tombstone for {}", self.0)
     }
 }
 
