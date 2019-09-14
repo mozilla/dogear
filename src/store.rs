@@ -63,6 +63,7 @@ pub trait Store {
         let (local_tree, time) = with_timing(|| self.fetch_local_tree())?;
         driver.record_telemetry_event(TelemetryEvent::FetchLocalTree(TreeStats {
             items: local_tree.size(),
+            deletions: local_tree.deletions().len(),
             problems: local_tree.problems().counts(),
             time,
         }));
@@ -73,6 +74,7 @@ pub trait Store {
         let (remote_tree, time) = with_timing(|| self.fetch_remote_tree())?;
         driver.record_telemetry_event(TelemetryEvent::FetchRemoteTree(TreeStats {
             items: remote_tree.size(),
+            deletions: local_tree.deletions().len(),
             problems: remote_tree.problems().counts(),
             time,
         }));
