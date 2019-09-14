@@ -1759,10 +1759,14 @@ impl<'t> MergedRoot<'t> {
     }
 
     /// Returns a sequence of completion operations, or "completion ops", to
-    /// apply to the local tree so that it matches the merged tree.
-    pub fn completion_ops(&self) -> CompletionOps<'_> {
+    /// apply to the local tree so that it matches the merged tree. The abort
+    /// signal can be used to interrupt fetching the ops.
+    pub fn completion_ops_with_signal(
+        &self,
+        signal: &impl AbortSignal,
+    ) -> Result<CompletionOps<'_>> {
         let mut ops = CompletionOps::default();
-        accumulate(&mut ops, self.node(), 1, false);
+        accumulate(signal, &mut ops, self.node(), 1, false)?;
 
         // Clean up tombstones for local and remote items that are revived on
         // the other side.
@@ -1774,6 +1778,7 @@ impl<'t> MergedRoot<'t> {
             // For ignored local deletions, we remove the local tombstone. If
             // the item is already deleted remotely, we also flag the remote
             // tombstone as merged.
+            signal.err_if_aborted()?;
             ops.delete_local_tombstones.push(DeleteLocalTombstone(guid));
             if self.remote_tree.is_deleted(guid) {
                 ops.set_remote_merged.push(SetRemoteMerged(guid));
@@ -1793,6 +1798,7 @@ impl<'t> MergedRoot<'t> {
             // we can avoid an extra write to flag the tombstone that we'll
             // replace with the item, anyway. If the item is already deleted
             // locally, we also delete the local tombstone.
+            signal.err_if_aborted()?;
             ops.set_remote_merged.push(SetRemoteMerged(guid));
             if self.local_tree.is_deleted(guid) {
                 ops.delete_local_tombstones.push(DeleteLocalTombstone(guid));
@@ -1800,7 +1806,8 @@ impl<'t> MergedRoot<'t> {
         }
 
         // Emit completion ops for deleted items.
-        for guid in self.delete_locally.union(&self.delete_remotely) {
+        for guid in self.deletions() {
+            signal.err_if_aborted()?;
             match (
                 self.local_tree.node_for_guid(guid),
                 self.remote_tree.node_for_guid(guid),
@@ -1842,7 +1849,14 @@ impl<'t> MergedRoot<'t> {
             }
         }
 
-        ops
+        Ok(ops)
+    }
+
+    /// Returns a sequence of completion ops, without interruption.
+    #[inline]
+    pub fn completion_ops(&self) -> CompletionOps<'_> {
+        self.completion_ops_with_signal(&DefaultAbortSignal)
+            .unwrap()
     }
 
     /// Returns an iterator for all accepted local and remote deletions.
@@ -2149,13 +2163,15 @@ impl<'t> fmt::Display for DeleteLocalItem<'t> {
 
 /// Recursively accumulates completion ops, starting at `merged_node` and
 /// drilling down into all its descendants.
-fn accumulate<'t>(
+fn accumulate<'t, A: AbortSignal>(
+    signal: &A,
     ops: &mut CompletionOps<'t>,
     merged_node: &'t MergedNode<'t>,
     level: usize,
     is_tagging: bool,
-) {
+) -> Result<()> {
     for (position, merged_child_node) in merged_node.merged_children.iter().enumerate() {
+        signal.err_if_aborted()?;
         let is_tagging = if merged_child_node.guid == TAGS_GUID {
             true
         } else {
@@ -2238,6 +2254,7 @@ fn accumulate<'t>(
                 ops.set_remote_merged.push(set_remote_merged);
             }
         }
-        accumulate(ops, merged_child_node, level + 1, is_tagging);
+        accumulate(signal, ops, merged_child_node, level + 1, is_tagging)?;
     }
+    Ok(())
 }
