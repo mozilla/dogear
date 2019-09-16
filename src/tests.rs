@@ -1143,8 +1143,8 @@ fn nonexistent_on_one_side() {
     assert_eq!(
         ops.summarize(),
         &[
-            "Flag bookmarkBBBB as merged",
-            "Remove tombstone for bookmarkAAAA",
+            "Flag remote bookmarkBBBB as merged",
+            "Delete local tombstone bookmarkAAAA",
         ]
     );
 
@@ -2216,7 +2216,7 @@ fn invalid_guids() {
             let count = self.0.get();
             self.0.set(count + 1);
             assert!(
-                &[")(*&", "shortGUID", "loooooongGUID", "!@#$%^", "",].contains(&old_guid.as_str()),
+                &[")(*&", "shortGUID", "loooooongGUID", "!@#$%^", ""].contains(&old_guid.as_str()),
                 "Didn't expect to generate new GUID for {}",
                 old_guid
             );
@@ -2688,15 +2688,17 @@ fn reupload_replace() {
         &[
             "Apply remote bookmarkFFFF",
             "Apply remote bookmarkKKKK",
-            "Delete bookmarkCCCC from local tree",
-            "Delete bookmarkEEEE from local tree",
-            "Delete bookmarkHHHH from local tree",
-            "Flag bookmarkAAAA for upload",
-            "Flag bookmarkEEEE as merged",
-            "Flag bookmarkKKKK for upload",
-            "Flag folderBBBBBB for upload",
-            "Flag folderGGGGGG for upload",
-            "Flag toolbar_____ for upload",
+            "Delete local item bookmarkCCCC",
+            "Delete local item bookmarkEEEE",
+            "Delete local item bookmarkHHHH",
+            "Flag local bookmarkAAAA as unmerged",
+            "Flag local bookmarkKKKK as unmerged",
+            "Flag local folderBBBBBB as unmerged",
+            "Flag local folderGGGGGG as unmerged",
+            "Flag local toolbar_____ as unmerged",
+            "Flag remote bookmarkEEEE as merged",
+            "Insert local tombstone bookmarkCCCC",
+            "Insert local tombstone bookmarkJJJJ",
             "Move bookmarkKKKK into unfiled_____ at 0",
             "Upload item bookmarkAAAA",
             "Upload item bookmarkKKKK",
@@ -2706,8 +2708,6 @@ fn reupload_replace() {
             "Upload tombstone bookmarkCCCC",
             "Upload tombstone bookmarkIIII",
             "Upload tombstone bookmarkJJJJ",
-            "Upload tombstone for bookmarkCCCC",
-            "Upload tombstone for bookmarkJJJJ"
         ]
     );
 
@@ -2817,7 +2817,7 @@ fn completion_ops() {
             .iter()
             .map(|op| op.to_string())
             .collect::<Vec<String>>(),
-        &["Don't upload bookmarkFFFF",]
+        &["Flag local bookmarkFFFF as merged"]
     );
     assert_eq!(
         ops.set_remote_merged
@@ -2825,13 +2825,13 @@ fn completion_ops() {
             .map(|op| op.to_string())
             .collect::<Vec<String>>(),
         &[
-            "Flag menu________ as merged",
-            "Flag bookmarkEEEE as merged",
-            "Flag toolbar_____ as merged",
-            "Flag bookmarkGGGG as merged",
-            "Flag bookmarkHHHH as merged",
-            "Flag bookmarkFFFF as merged",
-            "Flag bookmarkIIII as merged",
+            "Flag remote menu________ as merged",
+            "Flag remote bookmarkEEEE as merged",
+            "Flag remote toolbar_____ as merged",
+            "Flag remote bookmarkGGGG as merged",
+            "Flag remote bookmarkHHHH as merged",
+            "Flag remote bookmarkFFFF as merged",
+            "Flag remote bookmarkIIII as merged",
         ]
     );
     let mut delete_local_items = ops
@@ -2840,17 +2840,14 @@ fn completion_ops() {
         .map(|op| op.to_string())
         .collect::<Vec<String>>();
     delete_local_items.sort();
-    assert_eq!(
-        delete_local_items,
-        &["Delete bookmarkIIII from local tree",]
-    );
+    assert_eq!(delete_local_items, &["Delete local item bookmarkIIII"]);
     assert!(ops.insert_local_tombstones.is_empty());
     assert_eq!(
         ops.upload_items
             .iter()
             .map(|op| op.to_string())
             .collect::<Vec<String>>(),
-        &["Upload item unfiled_____",]
+        &["Upload item unfiled_____"]
     );
     let mut upload_tombstones = ops
         .upload_tombstones
@@ -2858,7 +2855,7 @@ fn completion_ops() {
         .map(|op| op.to_string())
         .collect::<Vec<String>>();
     upload_tombstones.sort();
-    assert_eq!(upload_tombstones, &["Upload tombstone bookmarkJJJJ",]);
+    assert_eq!(upload_tombstones, &["Upload tombstone bookmarkJJJJ"]);
 }
 
 #[test]

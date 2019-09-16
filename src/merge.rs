@@ -2063,7 +2063,7 @@ pub struct SetLocalUnmerged<'t> {
 
 impl<'t> fmt::Display for SetLocalUnmerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Flag {} for upload", self.merged_node.guid)
+        write!(f, "Flag local {} as unmerged", self.merged_node.guid)
     }
 }
 
@@ -2076,7 +2076,7 @@ pub struct SetLocalMerged<'t> {
 
 impl<'t> fmt::Display for SetLocalMerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Don't upload {}", self.merged_node.guid)
+        write!(f, "Flag local {} as merged", self.merged_node.guid)
     }
 }
 
@@ -2124,7 +2124,7 @@ impl<'t> SetRemoteMerged<'t> {
 
 impl<'t> fmt::Display for SetRemoteMerged<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Flag {} as merged", self.guid())
+        write!(f, "Flag remote {} as merged", self.guid())
     }
 }
 
@@ -2142,7 +2142,7 @@ impl<'t> InsertLocalTombstone<'t> {
 
 impl<'t> fmt::Display for InsertLocalTombstone<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Upload tombstone for {}", self.0.guid)
+        write!(f, "Insert local tombstone {}", self.0.guid)
     }
 }
 
@@ -2160,7 +2160,7 @@ impl<'t> DeleteLocalTombstone<'t> {
 
 impl<'t> fmt::Display for DeleteLocalTombstone<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Remove tombstone for {}", self.0)
+        write!(f, "Delete local tombstone {}", self.0)
     }
 }
 
@@ -2178,7 +2178,7 @@ impl<'t> DeleteLocalItem<'t> {
 
 impl<'t> fmt::Display for DeleteLocalItem<'t> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Delete {} from local tree", self.0.guid)
+        write!(f, "Delete local item {}", self.0.guid)
     }
 }
 
