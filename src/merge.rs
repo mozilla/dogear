@@ -1945,21 +1945,17 @@ impl<'t> CompletionOps<'t> {
     /// Returns a printable summary of all completion ops to apply.
     pub fn summarize(&self) -> Vec<String> {
         std::iter::empty()
-            .chain(self.change_guids.iter().map(ToString::to_string))
-            .chain(self.apply_remote_items.iter().map(ToString::to_string))
-            .chain(
-                self.apply_new_local_structure
-                    .iter()
-                    .map(ToString::to_string),
-            )
-            .chain(self.set_local_unmerged.iter().map(ToString::to_string))
-            .chain(self.set_local_merged.iter().map(ToString::to_string))
-            .chain(self.set_remote_merged.iter().map(ToString::to_string))
-            .chain(self.delete_local_tombstones.iter().map(ToString::to_string))
-            .chain(self.insert_local_tombstones.iter().map(ToString::to_string))
-            .chain(self.delete_local_items.iter().map(ToString::to_string))
-            .chain(self.upload_items.iter().map(ToString::to_string))
-            .chain(self.upload_tombstones.iter().map(ToString::to_string))
+            .chain(to_strings(&self.change_guids))
+            .chain(to_strings(&self.apply_remote_items))
+            .chain(to_strings(&self.apply_new_local_structure))
+            .chain(to_strings(&self.set_local_unmerged))
+            .chain(to_strings(&self.set_local_merged))
+            .chain(to_strings(&self.set_remote_merged))
+            .chain(to_strings(&self.delete_local_tombstones))
+            .chain(to_strings(&self.insert_local_tombstones))
+            .chain(to_strings(&self.delete_local_items))
+            .chain(to_strings(&self.upload_items))
+            .chain(to_strings(&self.upload_tombstones))
             .collect()
     }
 }
@@ -2278,4 +2274,9 @@ fn accumulate<'t, A: AbortSignal>(
         accumulate(signal, ops, merged_child_node, level + 1, is_tagging)?;
     }
     Ok(())
+}
+
+/// Converts all items in the list to strings.
+pub(crate) fn to_strings<'a, T: ToString>(items: &'a [T]) -> impl Iterator<Item = String> + 'a {
+    items.iter().map(ToString::to_string)
 }

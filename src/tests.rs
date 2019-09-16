@@ -23,7 +23,7 @@ use env_logger;
 use crate::driver::{DefaultAbortSignal, Driver};
 use crate::error::{Error, ErrorKind, Result};
 use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
-use crate::merge::{Merger, StructureCounts};
+use crate::merge::{to_strings, Merger, StructureCounts};
 use crate::tree::{
     self, Builder, Content, DivergedParent, DivergedParentGuid, Item, Kind, MergeState, Problem,
     ProblemCounts, Problems, Tree, Validity,
@@ -2787,10 +2787,7 @@ fn completion_ops() {
     let ops = merged_root.completion_ops();
     assert!(ops.change_guids.is_empty());
     assert_eq!(
-        ops.apply_remote_items
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&ops.apply_remote_items).collect::<Vec<_>>(),
         &[
             "Apply remote bookmarkEEEE",
             "Apply remote bookmarkGGGG",
@@ -2799,10 +2796,7 @@ fn completion_ops() {
         ]
     );
     assert_eq!(
-        ops.apply_new_local_structure
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&ops.apply_new_local_structure).collect::<Vec<_>>(),
         &[
             "Move bookmarkDDDD into menu________ at 1",
             "Move bookmarkBBBB into menu________ at 3",
@@ -2813,17 +2807,11 @@ fn completion_ops() {
     );
     assert!(ops.set_local_unmerged.is_empty());
     assert_eq!(
-        ops.set_local_merged
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&ops.set_local_merged).collect::<Vec<_>>(),
         &["Flag local bookmarkFFFF as merged"]
     );
     assert_eq!(
-        ops.set_remote_merged
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&ops.set_remote_merged).collect::<Vec<_>>(),
         &[
             "Flag remote menu________ as merged",
             "Flag remote bookmarkEEEE as merged",
@@ -2834,26 +2822,15 @@ fn completion_ops() {
             "Flag remote bookmarkIIII as merged",
         ]
     );
-    let mut delete_local_items = ops
-        .delete_local_items
-        .iter()
-        .map(|op| op.to_string())
-        .collect::<Vec<String>>();
+    let mut delete_local_items = to_strings(&ops.delete_local_items).collect::<Vec<_>>();
     delete_local_items.sort();
     assert_eq!(delete_local_items, &["Delete local item bookmarkIIII"]);
     assert!(ops.insert_local_tombstones.is_empty());
     assert_eq!(
-        ops.upload_items
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&ops.upload_items).collect::<Vec<_>>(),
         &["Upload item unfiled_____"]
     );
-    let mut upload_tombstones = ops
-        .upload_tombstones
-        .iter()
-        .map(|op| op.to_string())
-        .collect::<Vec<String>>();
+    let mut upload_tombstones = to_strings(&ops.upload_tombstones).collect::<Vec<_>>();
     upload_tombstones.sort();
     assert_eq!(upload_tombstones, &["Upload tombstone bookmarkJJJJ"]);
 }
@@ -2914,10 +2891,7 @@ fn problems() {
     let mut summary = problems.summarize().collect::<Vec<_>>();
     summary.sort_by(|a, b| a.guid().cmp(b.guid()));
     assert_eq!(
-        summary
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>(),
+        to_strings(&summary).collect::<Vec<_>>(),
         &[
             "bookmarkAAAA is an orphan",
             "bookmarkBBBB is in children of folderCCCCCC and has parent folderDDDDDD",
