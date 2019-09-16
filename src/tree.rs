@@ -76,12 +76,7 @@ impl Tree {
         Node(self, &self.entries[0])
     }
 
-    /// Returns an iterator for all node and tombstone GUIDs.
-    pub fn guids(&self) -> impl Iterator<Item = &Guid> {
-        self.entries.iter().map(|entry| &entry.item.guid)
-    }
-
-    /// Returns an iterator for all tombstoned GUIDs.
+    /// Returns the set of all tombstoned GUIDs.
     #[inline]
     pub fn deletions(&self) -> &HashSet<Guid> {
         &self.deleted_guids
@@ -106,6 +101,14 @@ impl Tree {
     #[inline]
     pub fn mentions(&self, guid: &Guid) -> bool {
         self.entry_index_by_guid.contains_key(guid) || self.deleted_guids.contains(guid)
+    }
+
+    /// Returns an iterator for all node and tombstone GUIDs.
+    pub fn guids(&self) -> impl Iterator<Item = &Guid> {
+        self.entries
+            .iter()
+            .map(|entry| &entry.item.guid)
+            .chain(self.deleted_guids.iter())
     }
 
     /// Returns the node for a given `guid`, or `None` if a node with the `guid`

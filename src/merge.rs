@@ -154,6 +154,23 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
             self.two_way_merge(local_root_node, remote_root_node)?
         };
 
+        // Any remaining deletions on one side should be deleted on the other side.
+        // This happens when the remote tree has tombstones for items that don't
+        // exist locally, or the local tree has tombstones for items that
+        // aren't on the server.
+        for guid in self.local_tree.deletions() {
+            self.signal.err_if_aborted()?;
+            if !self.mentions(guid) {
+                self.delete_remotely.insert(guid.clone());
+            }
+        }
+        for guid in self.remote_tree.deletions() {
+            self.signal.err_if_aborted()?;
+            if !self.mentions(guid) {
+                self.delete_locally.insert(guid.clone());
+            }
+        }
+
         // The merged tree should know about all items mentioned in the local
         // and remote trees. Otherwise, it's incomplete, and we can't apply it.
         // This indicates a bug in the merger.
@@ -1841,10 +1858,14 @@ impl<'t> MergedRoot<'t> {
                     ops.upload_tombstones.push(UploadTombstone(guid));
                 }
                 (None, None) => {
-                    // The item doesn't exist on either side, but was flagged
-                    // for deletion on both. This should never happen, and
-                    // indicates a bug in our merger.
-                    unreachable!("Can't delete nonexistent items on both sides")
+                    // Clean up local tombstones, and flag remote tombstones as
+                    // merged, for items deleted on both sides.
+                    if self.local_tree.is_deleted(guid) {
+                        ops.delete_local_tombstones.push(DeleteLocalTombstone(guid));
+                    }
+                    if self.remote_tree.is_deleted(guid) {
+                        ops.set_remote_merged.push(SetRemoteMerged(guid));
+                    }
                 }
             }
         }
