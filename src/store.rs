@@ -18,6 +18,7 @@ use crate::driver::{
     AbortSignal, DefaultAbortSignal, DefaultDriver, Driver, TelemetryEvent, TreeStats,
 };
 use crate::error::Error;
+use crate::guid::Guid;
 use crate::merge::{MergedRoot, Merger};
 use crate::tree::Tree;
 
@@ -91,12 +92,12 @@ pub trait Store {
             merged_root.node().to_ascii_string(),
             merged_root
                 .local_deletions()
-                .map(|guid| guid.as_str())
+                .map(Guid::as_str)
                 .collect::<Vec<_>>()
                 .join(", "),
             merged_root
                 .remote_deletions()
-                .map(|guid| guid.as_str())
+                .map(Guid::as_str)
                 .collect::<Vec<_>>()
                 .join(", ")
         );
