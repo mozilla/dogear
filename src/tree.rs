@@ -523,13 +523,26 @@ impl<'b> ParentBuilder<'b> {
     pub fn by_children(self, parent_guid: &Guid) -> Result<&'b mut Builder> {
         let parent_index = match self.0.entry_index_by_guid.get(parent_guid) {
             Some(&parent_index) if self.0.entries[parent_index].item.is_folder() => parent_index,
-            _ => {
-                let child_guid = match &self.1 {
-                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item.guid,
-                    BuilderEntryChild::Missing(guid) => guid,
+            Some(&parent_index) => {
+                let parent = &self.0.entries[parent_index].item;
+
+                let child = match &self.1 {
+                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
+                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
                 };
+
                 return Err(
-                    ErrorKind::InvalidParent(child_guid.clone(), parent_guid.clone()).into(),
+                    ErrorKind::InvalidParent(child.clone(), parent.clone()).into(),
+                );
+            },
+            _ => {
+                let child = match &self.1 {
+                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
+                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                };
+
+                return Err(
+                    ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into(),
                 );
             }
         };
@@ -588,13 +601,26 @@ impl<'b> ParentBuilder<'b> {
     pub fn by_structure(self, parent_guid: &Guid) -> Result<&'b mut Builder> {
         let parent_index = match self.0.entry_index_by_guid.get(parent_guid) {
             Some(&parent_index) if self.0.entries[parent_index].item.is_folder() => parent_index,
-            _ => {
-                let child_guid = match &self.1 {
-                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item.guid,
-                    BuilderEntryChild::Missing(guid) => guid,
+            Some(&parent_index) => {
+                let parent = &self.0.entries[parent_index].item;
+
+                let child = match &self.1 {
+                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
+                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
                 };
+
                 return Err(
-                    ErrorKind::InvalidParent(child_guid.clone(), parent_guid.clone()).into(),
+                    ErrorKind::InvalidParent(child.clone(), parent.clone()).into(),
+                );
+            },
+            _ => {
+                let child = match &self.1 {
+                    BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
+                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                };
+
+                return Err(
+                    ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into(),
                 );
             }
         };

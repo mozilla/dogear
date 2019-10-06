@@ -68,15 +68,20 @@ impl fmt::Display for Error {
             ),
             ErrorKind::DuplicateItem(guid) => write!(f, "Item {} already exists in tree", guid),
             ErrorKind::MissingItem(guid) => write!(f, "Item {} doesn't exist in tree", guid),
-            ErrorKind::InvalidParent(child_guid, parent_guid) => write!(
+            ErrorKind::InvalidParent(child, parent) => write!(
                 f,
-                "Can't insert item {} into non-folder {}",
-                child_guid, parent_guid
+                "Can't insert {} {} into {} {}",
+                child.kind,
+                child.guid,
+                parent.kind,
+                parent.guid,
             ),
-            ErrorKind::MissingParent(child_guid, parent_guid) => write!(
+            ErrorKind::MissingParent(child, parent_guid) => write!(
                 f,
-                "Can't insert item {} into nonexistent parent {}",
-                child_guid, parent_guid
+                "Can't insert {} {} into nonexistent parent {}",
+                child.kind,
+                child.guid,
+                parent_guid
             ),
             ErrorKind::Cycle(guid) => write!(f, "Item {} can't contain itself", guid),
             ErrorKind::MergeConflict => write!(f, "Local tree changed during merge"),
@@ -100,8 +105,8 @@ impl fmt::Display for Error {
 pub enum ErrorKind {
     MismatchedItemKind(Item, Item),
     DuplicateItem(Guid),
-    InvalidParent(Guid, Guid),
-    MissingParent(Guid, Guid),
+    InvalidParent(Item, Item),
+    MissingParent(Item, Guid),
     MissingItem(Guid),
     Cycle(Guid),
     MergeConflict,
