@@ -1606,7 +1606,7 @@ impl<'t> fmt::Display for Node<'t> {
 }
 
 /// An item in a local or remote bookmark tree.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Item {
     pub guid: Guid,
     pub kind: Kind,

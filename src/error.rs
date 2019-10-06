@@ -15,7 +15,7 @@
 use std::{error, fmt, result, str::Utf8Error, string::FromUtf16Error};
 
 use crate::guid::Guid;
-use crate::tree::Kind;
+use crate::Item;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -58,10 +58,13 @@ impl From<Utf8Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind() {
-            ErrorKind::MismatchedItemKind(local_kind, remote_kind) => write!(
+            ErrorKind::MismatchedItemKind(local_item, remote_item) => write!(
                 f,
-                "Can't merge local kind {} and remote kind {}",
-                local_kind, remote_kind
+                "Can't merge local {} {} and remote {} {}",
+                local_item.kind,
+                local_item.guid,
+                remote_item.kind,
+                remote_item.guid,
             ),
             ErrorKind::DuplicateItem(guid) => write!(f, "Item {} already exists in tree", guid),
             ErrorKind::MissingItem(guid) => write!(f, "Item {} doesn't exist in tree", guid),
@@ -95,7 +98,7 @@ impl fmt::Display for Error {
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    MismatchedItemKind(Kind, Kind),
+    MismatchedItemKind(Item, Item),
     DuplicateItem(Guid),
     InvalidParent(Guid, Guid),
     MissingParent(Guid, Guid),

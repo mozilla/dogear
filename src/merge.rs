@@ -318,7 +318,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                 self.driver,
                 "Merging local {} and remote {} with different kinds", local_node, remote_node
             );
-            return Err(ErrorKind::MismatchedItemKind(local_node.kind, remote_node.kind).into());
+            return Err(ErrorKind::MismatchedItemKind(local_node.item().clone(), remote_node.item().clone()).into());
         }
 
         self.merged_guids.insert(local_node.guid.clone());
