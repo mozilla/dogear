@@ -528,7 +528,11 @@ impl<'b> ParentBuilder<'b> {
 
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
-                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                    BuilderEntryChild::Missing(child_guid) => {
+                        return Err(
+                            ErrorKind::InvalidParentForUnknownChild(child_guid.clone(), parent.clone()).into(),
+                        )
+                    },
                 };
 
                 return Err(
@@ -538,7 +542,11 @@ impl<'b> ParentBuilder<'b> {
             _ => {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
-                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                    BuilderEntryChild::Missing(child_guid) => {
+                        return Err(
+                            ErrorKind::MissingParentForUnknownChild(child_guid.clone(), parent_guid.clone()).into(),
+                        )
+                    },
                 };
 
                 return Err(
@@ -606,7 +614,11 @@ impl<'b> ParentBuilder<'b> {
 
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
-                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                    BuilderEntryChild::Missing(child_guid) => {
+                        return Err(
+                            ErrorKind::InvalidParentForUnknownChild(child_guid.clone(), parent.clone()).into(),
+                        )
+                    },
                 };
 
                 return Err(
@@ -616,7 +628,11 @@ impl<'b> ParentBuilder<'b> {
             _ => {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
-                    BuilderEntryChild::Missing(_guid) => unimplemented!(),
+                    BuilderEntryChild::Missing(child_guid) => {
+                        return Err(
+                            ErrorKind::MissingParentForUnknownChild(child_guid.clone(), parent_guid.clone()).into(),
+                        )
+                    },
                 };
 
                 return Err(
