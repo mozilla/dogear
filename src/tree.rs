@@ -331,6 +331,9 @@ impl TryFrom<Builder> for Tree {
         let mut parents = Vec::with_capacity(builder.entries.len());
         let mut reparented_child_indices_by_parent: HashMap<Index, Vec<Index>> = HashMap::new();
         for (entry_index, entry) in builder.entries.iter().enumerate() {
+            if entry.item.validity == Validity::Replace {
+                problems.note(&entry.item.guid, Problem::InvalidItem);
+            }
             let r = ResolveParent::new(&builder, entry, &mut problems);
             let resolved_parent = r.resolve();
             if let ResolvedParent::ByParentGuid(parent_index) = resolved_parent {
@@ -1171,6 +1174,9 @@ pub enum Problem {
 
     /// The item is mentioned in a folder's `children`, but is deleted.
     DeletedChild { child_guid: Guid },
+
+    // This item is invalid e.g the URL is malformed
+    InvalidItem,
 }
 
 impl Problem {
@@ -1209,6 +1215,12 @@ impl Problem {
                 },
             ),
             Problem::DivergedParents(parents) => (parents, ProblemCounts::default()),
+            Problem::InvalidItem => {
+                return ProblemCounts {
+                    invalid_items: 1,
+                    ..ProblemCounts::default()
+                }
+            }
         };
         let deltas = match parents.as_slice() {
             // For items with different parents `by_parent_guid` and
@@ -1401,6 +1413,7 @@ impl<'a> fmt::Display for ProblemSummary<'a> {
             Problem::DeletedChild { child_guid } => {
                 return write!(f, "{} has deleted child {}", self.guid(), child_guid);
             }
+            Problem::InvalidItem => return write!(f, "{} is invalid", self.guid())
         };
         match parents.as_slice() {
             [a] => write!(f, "{}", a)?,
@@ -1446,6 +1459,8 @@ pub struct ProblemCounts {
     pub deleted_children: usize,
     /// Number of nonexistent items mentioned in all parents' `children`.
     pub missing_children: usize,
+    // Number of items with malformed URLs
+    pub invalid_items: usize,
 }
 
 impl ProblemCounts {
@@ -1463,6 +1478,7 @@ impl ProblemCounts {
                 + other.parent_child_disagreements,
             deleted_children: self.deleted_children + other.deleted_children,
             missing_children: self.missing_children + other.missing_children,
+            invalid_items: self.invalid_items + other.invalid_items,
         }
     }
 }
