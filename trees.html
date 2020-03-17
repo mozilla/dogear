@@ -1,0 +1,289 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Fetching local and remote trees - The Dogeared Book</title>
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="A guided introduction to bookmark merging with Dogear.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link href="https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800" rel="stylesheet" type="text/css">
+        <link href="https://fonts.googleapis.com/css?family=Source+Code+Pro:500" rel="stylesheet" type="text/css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+    </head>
+    <body class="light">
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">var path_to_root = "";</script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { } 
+            if (theme === null || theme === undefined) { theme = 'light'; }
+            document.body.className = theme;
+            document.querySelector('html').className = theme + ' js';
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <ol class="chapter"><li><a href="index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li><a href="integration.html"><strong aria-hidden="true">2.</strong> Integrating Dogear</a></li><li><ol class="section"><li><a href="trees.html" class="active"><strong aria-hidden="true">2.1.</strong> Fetching local and remote trees</a></li><li><a href="divergences.html"><strong aria-hidden="true">2.2.</strong> Divergences</a></li><li><a href="matching.html"><strong aria-hidden="true">2.3.</strong> Content matching</a></li><li><a href="application.html"><strong aria-hidden="true">2.4.</strong> Application</a></li></ol></li><li><a href="merging.html"><strong aria-hidden="true">3.</strong> The merge algorithm</a></li></ol>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar" class="menu-bar">
+                    <div id="menu-bar-sticky-container">
+                        <div class="left-buttons">
+                            <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                                <i class="fa fa-bars"></i>
+                            </button>
+                            <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                                <i class="fa fa-paint-brush"></i>
+                            </button>
+                            <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                                <li role="none"><button role="menuitem" class="theme" id="light">Light <span class="default">(default)</span></button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            </ul>
+                            
+                            <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                                <i class="fa fa-search"></i>
+                            </button>
+                            
+                        </div>
+
+                        <h1 class="menu-title">The Dogeared Book</h1> 
+
+                        <div class="right-buttons">
+                            <a href="print.html" title="Print this book" aria-label="Print this book">
+                                <i id="print-button" class="fa fa-print"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <a class="header" href="#fetching-local-and-remote-trees" id="fetching-local-and-remote-trees"><h1>Fetching local and remote trees</h1></a>
+<p>First, we need to teach our <code>Store</code> to inflate trees from the storage backend. As you might expect, <code>fetch_local_tree</code> builds the local tree, and <code>fetch_remote_tree</code> builds the remote tree. The trees should be complete, so don't leave out orphans, missing children, or bookmarks with invalid GUIDs or URLs. That way, Dogear has a full picture of the state of the world.</p>
+<p>Let's assume we've stored the following records. The current time is T = 11, A was downloaded during the last sync (at T = 6), and the menu and B during this sync:</p>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;menu&quot;, &quot;type&quot;: &quot;folder&quot;, &quot;parentid&quot;: &quot;places&quot;, &quot;children&quot;: [&quot;bookmarkAAAA&quot;, &quot;bookmarkBBBB&quot;], &quot;modified&quot;: 10 }
+{ &quot;id&quot;: &quot;bookmarkAAAA&quot;, &quot;type&quot;: &quot;bookmark&quot;, &quot;parentid&quot;: &quot;menu&quot;, &quot;modified&quot;: 5 }
+{ &quot;id&quot;: &quot;bookmarkBBBB&quot;, &quot;type&quot;: &quot;bookmark&quot;, &quot;parentid&quot;: &quot;menu&quot;, &quot;modified&quot;: 10 }
+</code></pre>
+<p>We can build a tree from those records like this, starting with the root:</p>
+<pre><pre class="playpen"><code class="language-rust">
+# #![allow(unused_variables)]
+#fn main() {
+# extern crate dogear;
+use dogear::{Item, Tree};
+let mut builder = Tree::with_root(Item::root());
+#}</code></pre></pre>
+<p>For cases where we know the structure is valid, and the tree already contains the parent, we can use <code>by_structure</code> to indicate that the parent's <code>children</code> and child's <code>parentid</code> match. This is how we build the local tree on Desktop. Notice that we also set the <code>needs_merge</code> flag, to indicate that the menu has changes that we should merge:</p>
+<pre><pre class="playpen"><code class="language-rust"># extern crate dogear;
+# use dogear::{Result, Tree};
+use dogear::{Guid, Item, Kind, MENU_GUID, ROOT_GUID};
+
+# fn main() -&gt; Result&lt;()&gt; {
+let now_millis = 11;
+
+# let mut builder = Tree::with_root(Item::root());
+let mut menu = Item::new(MENU_GUID.clone(), Kind::Folder);
+menu.age = now_millis - 10;
+menu.needs_merge = true;
+
+builder
+    .item(menu)?
+    .by_structure(&amp;ROOT_GUID)?;
+# Ok(())
+# }
+</code></pre></pre>
+<p>For cases where the <code>parentid</code> and <code>children</code> might disagree, we can set parents from <code>parentid</code> and <code>children</code> separately, using <code>by_parent_guid</code> and <code>by_children</code>. This is equivalent to <code>by_structure</code>, just slightly less efficient:</p>
+<pre><pre class="playpen"><code class="language-rust"># extern crate dogear;
+# use dogear::{Item, Kind, Tree, Result, MENU_GUID, ROOT_GUID};
+# fn main() -&gt; Result&lt;()&gt; {
+# let now_millis = 11;
+# let mut builder = Tree::with_root(Item::root());
+# let mut menu = Item::new(MENU_GUID.clone(), Kind::Folder);
+# builder.item(menu)?.by_structure(&amp;ROOT_GUID)?;
+let mut a = Item::new(&quot;bookmarkAAAA&quot;.into(), Kind::Bookmark);
+a.age = now_millis - 5;
+
+builder
+    .item(a)?
+    .by_parent_guid(MENU_GUID.clone())?;
+builder.parent_for(&amp;&quot;bookmarkAAAA&quot;.into())
+    .by_children(&amp;MENU_GUID)?;
+# Ok(())
+# }
+</code></pre></pre>
+<p>We can also insert an item without its parents, and set parents by <code>parentid</code> and <code>children</code> later, if they exist. This is also equivalent to the above:</p>
+<pre><pre class="playpen"><code class="language-rust"># extern crate dogear;
+# use dogear::{Item, Kind, Tree, Result, MENU_GUID, ROOT_GUID};
+# fn main() -&gt; Result&lt;()&gt; {
+# let now_millis = 11;
+# let mut builder = Tree::with_root(Item::root());
+# let mut menu = Item::new(MENU_GUID.clone(), Kind::Folder);
+# builder.item(menu)?.by_structure(&amp;ROOT_GUID)?;
+let mut b = Item::new(&quot;bookmarkBBBB&quot;.into(), Kind::Bookmark);
+b.age = now_millis - 10;
+b.needs_merge = true;
+
+builder.item(b)?;
+builder.parent_for(&amp;&quot;bookmarkBBBB&quot;.into())
+    .by_parent_guid(MENU_GUID.clone())?;
+builder.parent_for(&amp;&quot;bookmarkBBBB&quot;.into())
+    .by_children(&amp;MENU_GUID)?;
+# Ok(())
+# }
+</code></pre></pre>
+<p>Finally, let's build and print out our tree!</p>
+<pre><pre class="playpen"><code class="language-rust"># extern crate dogear;
+# use dogear::{Item, Tree, Result};
+use dogear::IntoTree;
+# fn main() -&gt; Result&lt;()&gt; {
+# let mut builder = Tree::with_root(Item::root());
+let tree = builder.into_tree()?;
+println!(&quot;{}&quot;, tree);
+# Ok(())
+# }
+</code></pre></pre>
+<p>And we see:</p>
+<pre><code class="language-txt">📂 root________ (Folder; Age = 0ms)
+| 📂 menu________ (Folder; Age = 1ms; Unmerged)
+| | 🔖 bookmarkAAAA (Bookmark; Age = 6ms)
+| | 🔖 bookmarkBBBB (Bookmark; Age = 1ms; Unmerged)
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+                            <a rel="prev" href="integration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+                        
+
+                        
+                            <a rel="next" href="divergences.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+                    <a href="integration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                
+
+                
+                    <a href="divergences.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+
+    </body>
+</html>

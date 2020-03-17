@@ -1,0 +1,245 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>The merge algorithm - The Dogeared Book</title>
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="A guided introduction to bookmark merging with Dogear.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link href="https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800" rel="stylesheet" type="text/css">
+        <link href="https://fonts.googleapis.com/css?family=Source+Code+Pro:500" rel="stylesheet" type="text/css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+    </head>
+    <body class="light">
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">var path_to_root = "";</script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { } 
+            if (theme === null || theme === undefined) { theme = 'light'; }
+            document.body.className = theme;
+            document.querySelector('html').className = theme + ' js';
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <ol class="chapter"><li><a href="index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li><a href="integration.html"><strong aria-hidden="true">2.</strong> Integrating Dogear</a></li><li><ol class="section"><li><a href="trees.html"><strong aria-hidden="true">2.1.</strong> Fetching local and remote trees</a></li><li><a href="divergences.html"><strong aria-hidden="true">2.2.</strong> Divergences</a></li><li><a href="matching.html"><strong aria-hidden="true">2.3.</strong> Content matching</a></li><li><a href="application.html"><strong aria-hidden="true">2.4.</strong> Application</a></li></ol></li><li><a href="merging.html" class="active"><strong aria-hidden="true">3.</strong> The merge algorithm</a></li></ol>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar" class="menu-bar">
+                    <div id="menu-bar-sticky-container">
+                        <div class="left-buttons">
+                            <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                                <i class="fa fa-bars"></i>
+                            </button>
+                            <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                                <i class="fa fa-paint-brush"></i>
+                            </button>
+                            <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                                <li role="none"><button role="menuitem" class="theme" id="light">Light <span class="default">(default)</span></button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            </ul>
+                            
+                            <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                                <i class="fa fa-search"></i>
+                            </button>
+                            
+                        </div>
+
+                        <h1 class="menu-title">The Dogeared Book</h1> 
+
+                        <div class="right-buttons">
+                            <a href="print.html" title="Print this book" aria-label="Print this book">
+                                <i id="print-button" class="fa fa-print"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <a class="header" href="#merging" id="merging"><h1>Merging</h1></a>
+<p>Dogear's <code>Merger</code> produces a complete, consistent merged tree from a local and remote bookmark tree. The merge algorithm examines each item, and resolves two kinds of changes:</p>
+<ul>
+<li><strong>Structure changes</strong> to an item's parent or children, like adding or deleting an item, moving an item to a different folder, or reordering a folder's children.</li>
+<li><strong>Value changes</strong> to an item's properties, like the title or URL.</li>
+</ul>
+<a class="header" href="#merge-states" id="merge-states"><h2>Merge states</h2></a>
+<p>Each merged item has a merge state that describes how to resolve the change. The merge state determines:</p>
+<ul>
+<li>Which side—local or remote—to prefer when resolving a conflict.</li>
+<li>Whether or not to <strong>apply</strong> a remote change to the local tree.</li>
+<li>Whether or not to <strong>upload</strong> the merged item to the server.</li>
+</ul>
+<p>There are seven merge states:</p>
+<ul>
+<li>Items that are unchanged (<code>MergeState::Unchanged</code>) on both sides don't need to be uploaded or applied.</li>
+<li>Items that only exist remotely (<code>MergeState::RemoteOnly</code>), only changed remotely, or have newer remote changes (<code>MergeState::Remote</code>), must be applied to the local tree. This overwrites any local changes to the item.</li>
+<li>Items that only exist remotely (<code>MergeState::RemoteOnlyWithNewStructure</code>) or have newer remote changes (<code>MergeState::RemoteWithNewStructure</code>), but <em>conflict</em> with local structure changes, must be applied to the local tree <em>and</em> reuploaded to the server. This resolves the conflict on both sides.</li>
+<li>Items that only exist locally (<code>MergeState::LocalOnly</code>), only changed locally, or have newer local changes (<code>MergeState::Local</code>), must be uploaded to the server. This overwrites remote changes to the item. Since <code>LocalOnly</code> and <code>Local</code> always imply upload, there are no corresponding <code>WithNewStructure</code> states.</li>
+</ul>
+<p>The merger starts at the roots of both trees, and recursively walks their children, eventually visiting every item.</p>
+<a class="header" href="#conflicts" id="conflicts"><h2>Conflicts</h2></a>
+<p>Structure and value conflicts, where an item changes on both sides, are resolved using timestamps, picking the chronologically newer side. The merger handles conflicts at the <em>item</em> level, not the <em>property</em> level, using the <code>needs_merge</code> flag.</p>
+<p>For example, consider changing a bookmark's title locally, and the same bookmark's URL remotely. Both items have <code>needs_merge = true</code> set.</p>
+<ul>
+<li>If the local title change is newer (<code>local_item.age &lt; remote_item.age</code>), the URL change will be reverted on the server.</li>
+<li>If the remote URL change is newer (<code>remote_item.age &gt; local_item.age</code>), the title change will be reverted locally.</li>
+</ul>
+<p>Since the only indication that an item changed is its <code>needs_merge</code> flag, and there's no shared parent tree, Dogear can't know which fields changed, or if they're independent. In other words, the merger knows <em>that</em> the item changed, but not <em>how</em>. For this reason, the algorithm is a <strong>two-way merge</strong>, not a three-way merge.</p>
+<p>This is a trade-off between simplicity and correctness: it removes a chunk of complexity from Dogear, and means that clients don't need to persist snapshots of the shared tree. However, it does mean that some conflicts will cause changes to revert on one side, which is a form of data loss.</p>
+<a class="header" href="#deletions" id="deletions"><h2>Deletions</h2></a>
+<p>Conflicts where an item is deleted on one or both sides are handled specially:</p>
+<ul>
+<li>If a non-folder item is changed on one side and deleted on the other, we ignore the deletion, and <em>revive</em> the item.</li>
+<li>If a non-root folder is changed on one side and deleted on the other, we keep the folder deleted, and recursively move any new descendants that don't exist on the other side to the closest surviving parent folder.</li>
+<li>If a root folder is deleted on one side, we ignore the deletion and revive the root. This should never happen except in cases of corruption on the server.</li>
+</ul>
+<p>If an item is deleted on both sides, there's no conflict, so we keep the deletion.</p>
+<a class="header" href="#non-syncable-items" id="non-syncable-items"><h2>Non-syncable items</h2></a>
+<p>A non-syncable item is:</p>
+<ul>
+<li>Any item that's not a descendant of a <em>user content root</em> (menu, mobile, toolbar, or unfiled) on either side.</li>
+<li>A remote livemarks.</li>
+<li>A remote orphaned query.</li>
+</ul>
+<p>If an item isn't syncable on either side—for example, a legacy organizer left pane query might be non-syncable locally, but orphaned and syncable remotely—it's deleted. Any syncable descendants of a non-syncable folder are relocated to the closest surviving parent folder.</p>
+<a class="header" href="#deduping" id="deduping"><h2>Deduping</h2></a>
+<p>If a remote item with the same GUID doesn't exist locally, the merger first tries to find an item with similar contents. This is called deduping. An item is a candidate for deduping if:</p>
+<ul>
+<li>It's not a root.</li>
+<li>It hasn't synced before. As a consequence, items that are already on the server will never dedupe to one another, even if they match.</li>
+</ul>
+<a class="header" href="#invalid-items" id="invalid-items"><h2>Invalid items</h2></a>
+<p>If an item on either side has an invalid GUID, the merger asks the <code>Driver</code> to generate a new one.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+                            <a rel="prev" href="application.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+                        
+
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+                    <a href="application.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                
+
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+
+    </body>
+</html>
