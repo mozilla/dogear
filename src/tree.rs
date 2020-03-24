@@ -25,7 +25,7 @@ use std::{
 use smallbitvec::SmallBitVec;
 
 use crate::error::{Error, ErrorKind, Result};
-use crate::guid::Guid;
+use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
 
 /// The type for entry indices in the tree.
 type Index = usize;
@@ -355,7 +355,7 @@ impl TryFrom<Builder> for Tree {
 
         // If any parents form cycles, abort. We haven't seen cyclic trees in
         // the wild, and breaking cycles would add complexity.
-        if let Some(index) = detect_cycles(&parents) {
+        if let Some(index) = detect_cycles(&parents, &mut builder) {
             return Err(ErrorKind::Cycle(builder.entries[index].item.guid.clone()).into());
         }
 
@@ -1116,7 +1116,7 @@ impl ResolvedParent {
 /// Detects cycles in resolved parents, using Floyd's tortoise and the hare
 /// algorithm. Returns the index of the entry where the cycle was detected,
 /// or `None` if there aren't any cycles.
-fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
+fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<Index> {
     let mut seen = SmallBitVec::from_elem(parents.len(), false);
     for (entry_index, parent) in parents.iter().enumerate() {
         if seen[entry_index] {
@@ -1126,7 +1126,9 @@ fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
         let mut grandparent_index = parent.index().and_then(|index| parents[index].index());
         while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
             if i == j {
-                return Some(i);
+                // return Some(i);
+                break_cycles(builder, i).expect("Can't break cycles");
+                return None;
             }
             if seen[i] || seen[j] {
                 break;
@@ -1139,6 +1141,34 @@ fn detect_cycles(parents: &[ResolvedParent]) -> Option<Index> {
         seen.set(entry_index, true);
     }
     None
+}
+
+fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
+    let mut unfiled = Item::new(UNFILED_GUID.clone(), Kind::Folder);
+    unfiled.age = 0;
+    unfiled.needs_merge = true;
+
+    {
+        let builder1 = &mut*builder;
+        builder1
+        .item(unfiled)?
+        .by_structure(&ROOT_GUID)?;
+    }
+
+    {
+        let cycle_start_guid = builder
+        .entries[cycle_start_index]
+        .item
+        .clone()
+        .guid;
+
+        let builder2 = &mut*builder;
+        builder2
+        .parent_for(&cycle_start_guid)
+        .by_structure(&UNFILED_GUID)?;
+    }
+
+    Ok(())
 }
 
 /// Indicates if a tree entry's structure diverged.
