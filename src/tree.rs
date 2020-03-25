@@ -259,7 +259,7 @@ impl Builder {
     pub fn item(&mut self, item: Item) -> Result<ItemBuilder<'_>> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         if self.entry_index_by_guid.contains_key(&item.guid) {
-            return Err(ErrorKind::DuplicateItem(item.guid.clone()).into());
+            return Err(ErrorKind::DuplicateItem(item.guid).into());
         }
         let entry_index = self.entries.len();
         self.entry_index_by_guid
@@ -1126,8 +1126,10 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
         let mut grandparent_index = parent.index().and_then(|index| parents[index].index());
         while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
             if i == j {
-                // return Some(i);
+                println!("CYCLE INDEX: {}", i);
+                println!("DC BUILDER: {:#?}", builder);
                 break_cycles(builder, i).expect("Can't break cycles");
+                // return Some(i);
                 return None;
             }
             if seen[i] || seen[j] {
@@ -1144,29 +1146,27 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
 }
 
 fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
-    let mut unfiled = Item::new(UNFILED_GUID.clone(), Kind::Folder);
+    let mut unfiled = Item::new(UNFILED_GUID, Kind::Folder);
     unfiled.age = 0;
     unfiled.needs_merge = true;
 
-    {
-        let builder1 = &mut*builder;
-        builder1
-        .item(unfiled)?
-        .by_structure(&ROOT_GUID)?;
-    }
-
-    {
-        let cycle_start_guid = builder
+    let cycle_start_guid = builder
         .entries[cycle_start_index]
         .item
         .clone()
         .guid;
 
-        let builder2 = &mut*builder;
-        builder2
+    builder
+        .item(unfiled)?;
+    //     .by_parent_guid(ROOT_GUID)?;
+    // &mut*builder
+    //     .parent_for(&UNFILED_GUID)
+    //     .by_children(&ROOT_GUID)?;
+    &mut*builder
         .parent_for(&cycle_start_guid)
-        .by_structure(&UNFILED_GUID)?;
-    }
+        .by_children(&UNFILED_GUID)?;
+
+    println!("BC BUILDER: {:#?}", builder);
 
     Ok(())
 }

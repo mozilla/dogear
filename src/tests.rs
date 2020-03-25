@@ -2568,9 +2568,11 @@ fn cycle() {
         })
         .expect("Should insert B");
 
+    b.into_tree();
+
     // match b
     //     .into_tree()
-    //     .expect_err("Should not build tree with cycles")
+    //     .expect_err("Should not build tree with cycles");
     //     .kind()
     // {
     //     ErrorKind::Cycle(guid) => {
