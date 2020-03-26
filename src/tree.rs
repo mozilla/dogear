@@ -1150,6 +1150,10 @@ fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
     unfiled.age = 0;
     unfiled.needs_merge = true;
 
+    let mut root = Item::new(ROOT_GUID, Kind::Folder);
+    root.age = 0;
+    root.needs_merge = true;
+
     let cycle_start_guid = builder
         .entries[cycle_start_index]
         .item
@@ -1157,14 +1161,17 @@ fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
         .guid;
 
     builder
-        .item(unfiled)?;
-    //     .by_parent_guid(ROOT_GUID)?;
+        .item(root.clone())?;
+
+    builder
+        .item(unfiled)?
+        .by_parent_guid(root.clone().guid)?;
     // &mut*builder
     //     .parent_for(&UNFILED_GUID)
     //     .by_children(&ROOT_GUID)?;
-    &mut*builder
-        .parent_for(&cycle_start_guid)
-        .by_children(&UNFILED_GUID)?;
+    // &mut*builder
+    //     .parent_for(&cycle_start_guid)
+    //     .by_children(&UNFILED_GUID)?;
 
     println!("BC BUILDER: {:#?}", builder);
 
