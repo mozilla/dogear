@@ -1127,8 +1127,8 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
         while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
             if i == j {
                 println!("CYCLE INDEX: {}", i);
-                println!("DC BUILDER: {:#?}", builder);
-                break_cycles(builder, i).expect("Can't break cycles");
+                // println!("DC BUILDER: {:#?}", builder);
+                break_cycles(builder, i, parents[i].index().expect("Can't unwrap parent index")).expect("Can't break cycles");
                 // return Some(i);
                 return None;
             }
@@ -1145,33 +1145,35 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
     None
 }
 
-fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
+fn break_cycles(builder: &mut Builder, cycle_start_index: Index, parent_index: Index) -> Result<()> {
     let mut unfiled = Item::new(UNFILED_GUID, Kind::Folder);
     unfiled.age = 0;
     unfiled.needs_merge = true;
 
-    let mut root = Item::new(ROOT_GUID, Kind::Folder);
-    root.age = 0;
-    root.needs_merge = true;
+    let entries = &mut builder.entries;
 
-    let cycle_start_guid = builder
-        .entries[cycle_start_index]
+    let cycle_start_guid = &entries[cycle_start_index]
+        .item
+        .clone()
+        .guid;
+
+    let parent_guid = entries[parent_index]
         .item
         .clone()
         .guid;
 
     builder
-        .item(root.clone())?;
+        .item(unfiled)?
+        .by_children(&ROOT_GUID)?;
 
     builder
-        .item(unfiled)?
-        .by_parent_guid(root.clone().guid)?;
-    // &mut*builder
-    //     .parent_for(&UNFILED_GUID)
-    //     .by_children(&ROOT_GUID)?;
-    // &mut*builder
-    //     .parent_for(&cycle_start_guid)
-    //     .by_children(&UNFILED_GUID)?;
+        .parent_for(&parent_guid)
+        .by_children(&UNFILED_GUID)?;
+
+    builder
+        .parent_for(&cycle_start_guid)
+        .by_children(&parent_guid.clone())?;
+
 
     println!("BC BUILDER: {:#?}", builder);
 
