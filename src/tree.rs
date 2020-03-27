@@ -356,7 +356,8 @@ impl TryFrom<Builder> for Tree {
         // If any parents form cycles, abort. We haven't seen cyclic trees in
         // the wild, and breaking cycles would add complexity.
         if let Some(index) = detect_cycles(&parents, &mut builder) {
-            return Err(ErrorKind::Cycle(builder.entries[index].item.guid.clone()).into());
+            let unfiled_index = builder.entry_index_by_guid[&UNFILED_GUID];
+            parents.push(ResolvedParent::ByStructure(unfiled_index));
         }
 
         // Then, resolve children, and build a slab of entries for the tree.
@@ -386,17 +387,16 @@ impl TryFrom<Builder> for Tree {
 
             // If the entry is a zombie, mark it as diverged, so that the merger
             // can remove the tombstone and reupload the item.
-            if zombies[entry_index] {
+            if zombies.len() > entry_index && zombies[entry_index] {
                 divergence = Divergence::Diverged;
             }
-
             // Check if the entry's children exist and agree that this entry is
             // their parent.
             let mut child_indices = Vec::with_capacity(entry.children.len());
             for child in entry.children {
                 match child {
                     BuilderEntryChild::Exists(child_index) => {
-                        if zombies[entry_index] {
+                        if zombies.len() > entry_index && zombies[entry_index] {
                             // If the entry has a zombie child, mark it as
                             // diverged.
                             divergence = Divergence::Diverged;
@@ -1126,10 +1126,9 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
         let mut grandparent_index = parent.index().and_then(|index| parents[index].index());
         while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
             if i == j {
-                // println!("DC BUILDER: {:#?}", builder);
                 break_cycles(builder, i).expect("Can't break cycles");
-                // return Some(i);
-                return None;
+                return Some(i);
+                // return None;
             }
             if seen[i] || seen[j] {
                 break;
@@ -1149,7 +1148,7 @@ fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
     unfiled.age = 0;
     unfiled.needs_merge = true;
 
-    let cycle_start_guid = &mut builder
+    let cycle_start_guid = builder
         .entries[cycle_start_index]
         .item
         .clone()

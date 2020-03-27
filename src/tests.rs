@@ -2569,6 +2569,7 @@ fn cycle() {
         .expect("Should insert B");
 
     b.into_tree();
+    assert!(false);
 
     // match b
     //     .into_tree()
@@ -2576,7 +2577,6 @@ fn cycle() {
     //     .kind()
     // {
     //     ErrorKind::Cycle(guid) => {
-    //         // println!("GUID: {}", guid);
     //         assert_eq!(guid, &Guid::from("folderAAAAAA"));
     //     },
     //     err => panic!("Wrong error kind for cycle: {:?}", err),
