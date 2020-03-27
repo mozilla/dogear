@@ -1126,9 +1126,8 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
         let mut grandparent_index = parent.index().and_then(|index| parents[index].index());
         while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
             if i == j {
-                println!("CYCLE INDEX: {}", i);
                 // println!("DC BUILDER: {:#?}", builder);
-                break_cycles(builder, i, parents[i].index().expect("Can't unwrap parent index")).expect("Can't break cycles");
+                break_cycles(builder, i).expect("Can't break cycles");
                 // return Some(i);
                 return None;
             }
@@ -1145,19 +1144,13 @@ fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<In
     None
 }
 
-fn break_cycles(builder: &mut Builder, cycle_start_index: Index, parent_index: Index) -> Result<()> {
+fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
     let mut unfiled = Item::new(UNFILED_GUID, Kind::Folder);
     unfiled.age = 0;
     unfiled.needs_merge = true;
 
-    let entries = &mut builder.entries;
-
-    let cycle_start_guid = &entries[cycle_start_index]
-        .item
-        .clone()
-        .guid;
-
-    let parent_guid = entries[parent_index]
+    let cycle_start_guid = &mut builder
+        .entries[cycle_start_index]
         .item
         .clone()
         .guid;
@@ -1167,15 +1160,8 @@ fn break_cycles(builder: &mut Builder, cycle_start_index: Index, parent_index: I
         .by_children(&ROOT_GUID)?;
 
     builder
-        .parent_for(&parent_guid)
-        .by_children(&UNFILED_GUID)?;
-
-    builder
         .parent_for(&cycle_start_guid)
-        .by_children(&parent_guid.clone())?;
-
-
-    println!("BC BUILDER: {:#?}", builder);
+        .by_children(&UNFILED_GUID)?;
 
     Ok(())
 }
