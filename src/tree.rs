@@ -25,7 +25,7 @@ use std::{
 use smallbitvec::SmallBitVec;
 
 use crate::error::{Error, ErrorKind, Result};
-use crate::guid::{Guid, ROOT_GUID, UNFILED_GUID};
+use crate::guid::Guid;
 
 /// The type for entry indices in the tree.
 type Index = usize;
@@ -254,6 +254,22 @@ impl Builder {
         self
     }
 
+    /// Returns the index of the default parent entry for reparented orphans.
+    /// This is either the default folder (rule 4), or the root, if the
+    /// default folder isn't set, doesn't exist, or isn't a folder (rule 5).
+    fn reparent_orphans_to_default_index(&self) -> Index {
+        self
+            .reparent_orphans_to
+            .as_ref()
+            .and_then(|guid| self.entry_index_by_guid.get(guid))
+            .cloned()
+            .filter(|&parent_index| {
+                let parent_entry = &self.entries[parent_index];
+                parent_entry.item.is_folder()
+            })
+            .unwrap_or(0)
+    }
+
     /// Inserts an `item` into the tree. Returns an error if the item already
     /// exists.
     pub fn item(&mut self, item: Item) -> Result<ItemBuilder<'_>> {
@@ -353,11 +369,20 @@ impl TryFrom<Builder> for Tree {
             parents.push(resolved_parent);
         }
 
-        // If any parents form cycles, abort. We haven't seen cyclic trees in
-        // the wild, and breaking cycles would add complexity.
-        if let Some(index) = detect_cycles(&parents, &mut builder) {
-            let unfiled_index = builder.entry_index_by_guid[&UNFILED_GUID];
-            parents.push(ResolvedParent::ByStructure(unfiled_index));
+        let cycles_exist_by_entry = detect_cycles(&parents);
+        if !cycles_exist_by_entry.all_false() {
+            for (entry_index, cycle_exists_by_entry) in cycles_exist_by_entry.iter().enumerate() {
+                if cycle_exists_by_entry {
+                    // println!("PARENT: {:#?}", parents[entry_index]);
+                    let default_index = builder.reparent_orphans_to_default_index();
+                    parents[entry_index] = ResolvedParent::ByParentGuid(default_index);
+
+                    let reparented_child_indices = reparented_child_indices_by_parent
+                        .entry(default_index)
+                        .or_default();
+                    reparented_child_indices.push(entry_index);
+                }
+            }
         }
 
         // Then, resolve children, and build a slab of entries for the tree.
@@ -387,16 +412,17 @@ impl TryFrom<Builder> for Tree {
 
             // If the entry is a zombie, mark it as diverged, so that the merger
             // can remove the tombstone and reupload the item.
-            if zombies.len() > entry_index && zombies[entry_index] {
+            if zombies[entry_index] {
                 divergence = Divergence::Diverged;
             }
+
             // Check if the entry's children exist and agree that this entry is
             // their parent.
             let mut child_indices = Vec::with_capacity(entry.children.len());
             for child in entry.children {
                 match child {
                     BuilderEntryChild::Exists(child_index) => {
-                        if zombies.len() > entry_index && zombies[entry_index] {
+                        if zombies[entry_index] {
                             // If the entry has a zombie child, mark it as
                             // diverged.
                             divergence = Divergence::Diverged;
@@ -909,7 +935,7 @@ impl<'a> ResolveParent<'a> {
                 // The item doesn't have a `parentid`, and isn't mentioned in
                 // any `children`. Reparent to the default folder (rule 4) or
                 // Places root (rule 5).
-                let parent_index = self.reparent_orphans_to_default_index();
+                let parent_index = self.builder.reparent_orphans_to_default_index();
                 self.problems.note(&self.entry.item.guid, Problem::Orphan);
                 ResolvedParent::ByParentGuid(parent_index)
             }
@@ -954,27 +980,11 @@ impl<'a> ResolveParent<'a> {
                     .unwrap_or_else(|| {
                         // Fall back to the default folder (rule 4) or root
                         // (rule 5) if we didn't find a parent.
-                        let parent_index = self.reparent_orphans_to_default_index();
+                        let parent_index = self.builder.reparent_orphans_to_default_index();
                         ResolvedParent::ByParentGuid(parent_index)
                     })
             }
         }
-    }
-
-    /// Returns the index of the default parent entry for reparented orphans.
-    /// This is either the default folder (rule 4), or the root, if the
-    /// default folder isn't set, doesn't exist, or isn't a folder (rule 5).
-    fn reparent_orphans_to_default_index(&self) -> Index {
-        self.builder
-            .reparent_orphans_to
-            .as_ref()
-            .and_then(|guid| self.builder.entry_index_by_guid.get(guid))
-            .cloned()
-            .filter(|&parent_index| {
-                let parent_entry = &self.builder.entries[parent_index];
-                parent_entry.item.is_folder()
-            })
-            .unwrap_or(0)
     }
 }
 
@@ -1114,55 +1124,53 @@ impl ResolvedParent {
 }
 
 /// Detects cycles in resolved parents, using Floyd's tortoise and the hare
-/// algorithm. Returns the index of the entry where the cycle was detected,
-/// or `None` if there aren't any cycles.
-fn detect_cycles(parents: &[ResolvedParent], builder: &mut Builder) -> Option<Index> {
+/// algorithm. Returns a list of entries indicating which have cycles.
+fn detect_cycles(parents: &[ResolvedParent]) -> SmallBitVec {
     let mut seen = SmallBitVec::from_elem(parents.len(), false);
-    for (entry_index, parent) in parents.iter().enumerate() {
+    let mut cycles_seen = SmallBitVec::from_elem(parents.len(), false);
+
+    'outer: for (entry_index, parent) in parents.iter().enumerate() {
         if seen[entry_index] {
             continue;
         }
-        let mut parent_index = parent.index();
-        let mut grandparent_index = parent.index().and_then(|index| parents[index].index());
-        while let (Some(i), Some(j)) = (parent_index, grandparent_index) {
+        let mut tortoise = parent.index();
+        let mut hare = parent.index().and_then(|index| parents[index].index());
+
+        while let (Some(i), Some(j)) = (tortoise, hare) {
             if i == j {
-                break_cycles(builder, i).expect("Can't break cycles");
-                return Some(i);
-                // return None;
+                let cycle_start = get_cycle_start(Some(entry_index), hare, parents)
+                    .expect("Can't determine a starting index for the cycle");
+                cycles_seen.set(cycle_start, true);
+                seen.set(entry_index, true);
+                continue 'outer;
             }
             if seen[i] || seen[j] {
                 break;
             }
-            parent_index = parent_index.and_then(|index| parents[index].index());
-            grandparent_index = grandparent_index
+            tortoise = tortoise.and_then(|index| parents[index].index());
+            hare = hare
                 .and_then(|index| parents[index].index())
                 .and_then(|index| parents[index].index());
         }
         seen.set(entry_index, true);
     }
-    None
+    return cycles_seen;
 }
 
-fn break_cycles(builder: &mut Builder, cycle_start_index: Index) -> Result<()> {
-    let mut unfiled = Item::new(UNFILED_GUID, Kind::Folder);
-    unfiled.age = 0;
-    unfiled.needs_merge = true;
+/// Given the index where the cycle was detected using Floyd's algorithm, get_cycle_start will return the index
+/// of the entry where the cycle began.
+fn get_cycle_start(entry: Option<Index>, cycle_detected: Option<Index>, parents: &[ResolvedParent]) -> Option<Index> {
+    let mut tortoise = entry;
+    let mut hare = cycle_detected;
 
-    let cycle_start_guid = builder
-        .entries[cycle_start_index]
-        .item
-        .clone()
-        .guid;
-
-    builder
-        .item(unfiled)?
-        .by_children(&ROOT_GUID)?;
-
-    builder
-        .parent_for(&cycle_start_guid)
-        .by_children(&UNFILED_GUID)?;
-
-    Ok(())
+    while let (Some(t), Some(h)) = (tortoise, hare) {
+        if t == h {
+            return Some(t);
+        }
+        tortoise = tortoise.and_then(|i| parents[i].index());
+        hare = hare.and_then(|i| parents[i].index());
+    }
+    return None;
 }
 
 /// Indicates if a tree entry's structure diverged.

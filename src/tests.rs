@@ -2551,6 +2551,27 @@ fn moved_user_content_roots() {
 fn cycle() {
     before_each();
 
+    // let mut b: Builder = nodes!({ ("menu________", Folder)}).try_into().unwrap();
+
+    // b.item(Item::new("folderAAAAAA".into(), Kind::Folder))
+    //     .and_then(|p| p.by_parent_guid("folderBBBBBB".into()))
+    //     .expect("Should insert A");
+
+    // b.item(Item::new("folderBBBBBB".into(), Kind::Folder))
+    //     .and_then(|p| p.by_parent_guid("folderCCCCCC".into()))
+    //     .expect("Should insert B");
+
+    // b.item(Item::new("folderCCCCCC".into(), Kind::Folder))
+    //     .and_then(|p| p.by_parent_guid("menu________".into()))
+    //     .and_then(|b| {
+    //         b.parent_for(&"folderCCCCCC".into())
+    //             .by_children(&"folderAAAAAA".into())
+    //     })
+    //     .expect("Should insert C");
+
+    // b.into_tree();
+    // assert!(false);
+
     // Try to create a cycle: move A into B, and B into the menu, but keep
     // B's parent by children as A.
     // i.e. folderBBBBBB -> folderAAAAAA -> folderBBBBBB -> menu -> root
@@ -2573,12 +2594,10 @@ fn cycle() {
 
     // match b
     //     .into_tree()
-    //     .expect_err("Should not build tree with cycles");
+    //     .expect_err("Should not build tree with cycles")
     //     .kind()
     // {
-    //     ErrorKind::Cycle(guid) => {
-    //         assert_eq!(guid, &Guid::from("folderAAAAAA"));
-    //     },
+    //     ErrorKind::Cycle(guid) => assert_eq!(guid, &Guid::from("folderAAAAAA")),
     //     err => panic!("Wrong error kind for cycle: {:?}", err),
     // }
 }
