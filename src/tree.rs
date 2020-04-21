@@ -373,7 +373,6 @@ impl TryFrom<Builder> for Tree {
         if !cycles_exist_by_entry.all_false() {
             for (entry_index, cycle_exists_by_entry) in cycles_exist_by_entry.iter().enumerate() {
                 if cycle_exists_by_entry {
-                    // println!("PARENT: {:#?}", parents[entry_index]);
                     let default_index = builder.reparent_orphans_to_default_index();
                     parents[entry_index] = ResolvedParent::ByParentGuid(default_index);
 
