@@ -39,6 +39,6 @@ deploy:
   provider: pages
   skip-cleanup: true
   local-dir: book
-  github-token: $GH_DEPLOY_TOKEN
+  github-token: $GH_DEPLOY_KEY
   on:
     branch: master
