@@ -93,10 +93,13 @@ impl fmt::Display for Error {
             ErrorKind::MissingParentForUnknownChild(child_guid, parent_guid) => write!(
                 f,
                 "Can't insert unknown child {} into nonexistent parent {}",
-                child_guid,
-                parent_guid,
+                child_guid, parent_guid,
             ),
-            ErrorKind::Cycle(guid) => write!(f, "Item {} can't contain itself", guid),
+            ErrorKind::Cycle(guid) => write!(
+                f,
+                "YOU ARE BREAKING THE ASSUMPTION OF LACK OF LOOPERINOS IN {} NOOOOOOOOO",
+                guid
+            ),
             ErrorKind::MergeConflict => write!(f, "Local tree changed during merge"),
             ErrorKind::UnmergedLocalItems => {
                 write!(f, "Merged tree doesn't mention all items from local tree")
