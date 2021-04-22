@@ -1680,10 +1680,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     *node
                 })
             };
-            mem::replace(
-                &mut self.matching_dupes_by_local_parent_guid,
-                matching_dupes_by_local_parent_guid,
-            );
+            self.matching_dupes_by_local_parent_guid = matching_dupes_by_local_parent_guid;
             Ok(new_remote_node)
         } else {
             trace!(
@@ -1739,10 +1736,7 @@ impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
                     *node
                 })
             };
-            mem::replace(
-                &mut self.matching_dupes_by_local_parent_guid,
-                matching_dupes_by_local_parent_guid,
-            );
+            self.matching_dupes_by_local_parent_guid = matching_dupes_by_local_parent_guid;
             Ok(new_local_node)
         } else {
             trace!(

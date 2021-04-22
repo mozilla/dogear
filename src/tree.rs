@@ -488,7 +488,7 @@ impl<'b> ItemBuilder<'b> {
     /// items with similar contents and different GUIDs.
     #[inline]
     pub fn content<'c>(&'c mut self, content: Content) -> &'c mut ItemBuilder<'b> {
-        mem::replace(&mut self.0.entries[self.1].content, Some(content));
+        self.0.entries[self.1].content = Some(content);
         self
     }
 
@@ -700,7 +700,7 @@ impl BuilderEntry {
         let old_parent = mem::replace(&mut self.parent, BuilderEntryParent::None);
         let new_parent = match old_parent {
             BuilderEntryParent::Root => {
-                mem::replace(&mut self.parent, BuilderEntryParent::Root);
+                self.parent = BuilderEntryParent::Root;
                 return Err(ErrorKind::DuplicateItem(self.item.guid.clone()).into());
             }
             BuilderEntryParent::None => match new_parents {
@@ -728,7 +728,7 @@ impl BuilderEntry {
                 BuilderEntryParent::Partial(parents)
             }
         };
-        mem::replace(&mut self.parent, new_parent);
+        self.parent = new_parent;
         Ok(())
     }
 }
