@@ -532,29 +532,29 @@ impl<'b> ParentBuilder<'b> {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
                     BuilderEntryChild::Missing(child_guid) => {
-                        return Err(
-                            ErrorKind::InvalidParentForUnknownChild(child_guid.clone(), parent.clone()).into(),
+                        return Err(ErrorKind::InvalidParentForUnknownChild(
+                            child_guid.clone(),
+                            parent.clone(),
                         )
-                    },
+                        .into())
+                    }
                 };
 
-                return Err(
-                    ErrorKind::InvalidParent(child.clone(), parent.clone()).into(),
-                );
-            },
+                return Err(ErrorKind::InvalidParent(child.clone(), parent.clone()).into());
+            }
             _ => {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
                     BuilderEntryChild::Missing(child_guid) => {
-                        return Err(
-                            ErrorKind::MissingParentForUnknownChild(child_guid.clone(), parent_guid.clone()).into(),
+                        return Err(ErrorKind::MissingParentForUnknownChild(
+                            child_guid.clone(),
+                            parent_guid.clone(),
                         )
-                    },
+                        .into())
+                    }
                 };
 
-                return Err(
-                    ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into(),
-                );
+                return Err(ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into());
             }
         };
         if let BuilderEntryChild::Exists(child_index) = &self.1 {
@@ -618,29 +618,29 @@ impl<'b> ParentBuilder<'b> {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
                     BuilderEntryChild::Missing(child_guid) => {
-                        return Err(
-                            ErrorKind::InvalidParentForUnknownChild(child_guid.clone(), parent.clone()).into(),
+                        return Err(ErrorKind::InvalidParentForUnknownChild(
+                            child_guid.clone(),
+                            parent.clone(),
                         )
-                    },
+                        .into())
+                    }
                 };
 
-                return Err(
-                    ErrorKind::InvalidParent(child.clone(), parent.clone()).into(),
-                );
-            },
+                return Err(ErrorKind::InvalidParent(child.clone(), parent.clone()).into());
+            }
             _ => {
                 let child = match &self.1 {
                     BuilderEntryChild::Exists(index) => &self.0.entries[*index].item,
                     BuilderEntryChild::Missing(child_guid) => {
-                        return Err(
-                            ErrorKind::MissingParentForUnknownChild(child_guid.clone(), parent_guid.clone()).into(),
+                        return Err(ErrorKind::MissingParentForUnknownChild(
+                            child_guid.clone(),
+                            parent_guid.clone(),
                         )
-                    },
+                        .into())
+                    }
                 };
 
-                return Err(
-                    ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into(),
-                );
+                return Err(ErrorKind::MissingParent(child.clone(), parent_guid.clone()).into());
             }
         };
         if let BuilderEntryChild::Exists(child_index) = &self.1 {
@@ -1170,10 +1170,14 @@ pub enum Problem {
     DivergedParents(Vec<DivergedParent>),
 
     /// The item is mentioned in a folder's `children`, but doesn't exist.
-    MissingChild { child_guid: Guid },
+    MissingChild {
+        child_guid: Guid,
+    },
 
     /// The item is mentioned in a folder's `children`, but is deleted.
-    DeletedChild { child_guid: Guid },
+    DeletedChild {
+        child_guid: Guid,
+    },
 
     // This item is invalid e.g the URL is malformed
     InvalidItem,
@@ -1413,7 +1417,7 @@ impl<'a> fmt::Display for ProblemSummary<'a> {
             Problem::DeletedChild { child_guid } => {
                 return write!(f, "{} has deleted child {}", self.guid(), child_guid);
             }
-            Problem::InvalidItem => return write!(f, "{} is invalid", self.guid())
+            Problem::InvalidItem => return write!(f, "{} is invalid", self.guid()),
         };
         match parents.as_slice() {
             [a] => write!(f, "{}", a)?,
