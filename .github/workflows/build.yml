@@ -1,0 +1,21 @@
+name: Run
+on:
+  push:
+  pull_request:
+    types: [opened]
+jobs:
+  Rust-Tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: [stable, beta, nightly]
+    steps:
+      - name: Build Dogear
+        run: |
+          git init .
+          git remote add origin https://github.com/mozilla/dogear.git
+          git pull origin ${GITHUB_REF##*/}
+          cargo clean
+          cargo build
+      - name: Run Rust Tests
+        run: cargo test
