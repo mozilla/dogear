@@ -57,6 +57,9 @@ impl From<Utf8Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // We format the guid-specific params with <guid: {}> to make it easier on the
+        // telemetry side to parse out the user-specific guid and normalize the errors
+        // to better aggregate the data
         match self.kind() {
             ErrorKind::MismatchedItemKind(local_item, remote_item) => write!(
                 f,
